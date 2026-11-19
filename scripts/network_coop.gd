@@ -4,6 +4,7 @@ const CombatView = preload("res://scripts/combat.gd")
 const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
 const NetworkSession = preload("res://scripts/network/network_coop_session.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
+const EnemyPlaytestSelector = preload("res://scripts/ui/enemy_playtest_selector.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 const STATUS_ENCOUNTER = preload("res://resources/prototype/status_playtest/encounter.tres")
 const MODIFIER_ENCOUNTER = preload("res://resources/prototype/modifier_playtest/encounter.tres")
@@ -15,6 +16,7 @@ const MODIFIER_ENCOUNTER = preload("res://resources/prototype/modifier_playtest/
 @onready var short_run_field: CheckBox = %ShortRun
 @onready var status_playtest_field: CheckBox = %StatusPlaytest
 @onready var modifier_playtest_field: CheckBox = %ModifierPlaytest
+@onready var enemy_playtest_field: EnemyPlaytestSelector = %EnemyPlaytest
 @onready var default_encounter := session.encounter
 @onready var status_label: Label = %ConnectionStatus
 @onready var roster_label: Label = %PartyRoster
@@ -40,6 +42,7 @@ func _ready() -> void:
 	short_run_field.toggled.connect(_on_short_run_toggled)
 	status_playtest_field.toggled.connect(_on_status_playtest_toggled)
 	modifier_playtest_field.toggled.connect(_on_modifier_playtest_toggled)
+	enemy_playtest_field.item_selected.connect(_on_enemy_playtest_selected)
 	_combat = COMBAT_SCENE.instantiate()
 	_combat.configure_network()
 	_combat.network_card_requested.connect(session.submit_card)
@@ -61,6 +64,7 @@ func _refresh() -> void:
 	short_run_field.disabled = connected_or_waiting
 	status_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
 	modifier_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
+	enemy_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
 	roster_label.visible = session.party_size > 0
 	if roster_label.visible:
 		roster_label.text = "%d/%d connected" % [session.connected_players.size(), session.party_size]
@@ -149,20 +153,31 @@ func _on_short_run_toggled(enabled: bool) -> void:
 	if enabled:
 		status_playtest_field.set_pressed_no_signal(false)
 		modifier_playtest_field.set_pressed_no_signal(false)
+		enemy_playtest_field.select(0)
 		_select_encounter_fixture()
 	status_playtest_field.disabled = enabled
 	modifier_playtest_field.disabled = enabled
+	enemy_playtest_field.disabled = enabled
 
 
 func _on_status_playtest_toggled(enabled: bool) -> void:
 	if enabled:
 		modifier_playtest_field.set_pressed_no_signal(false)
+		enemy_playtest_field.select(0)
 	_select_encounter_fixture()
 
 
 func _on_modifier_playtest_toggled(enabled: bool) -> void:
 	if enabled:
 		status_playtest_field.set_pressed_no_signal(false)
+		enemy_playtest_field.select(0)
+	_select_encounter_fixture()
+
+
+func _on_enemy_playtest_selected(index: int) -> void:
+	if index > 0:
+		status_playtest_field.set_pressed_no_signal(false)
+		modifier_playtest_field.set_pressed_no_signal(false)
 	_select_encounter_fixture()
 
 
@@ -172,7 +187,8 @@ func _select_encounter_fixture() -> void:
 	elif modifier_playtest_field.button_pressed:
 		session.encounter = MODIFIER_ENCOUNTER
 	else:
-		session.encounter = default_encounter
+		var enemy_prototype := enemy_playtest_field.selected_encounter()
+		session.encounter = enemy_prototype if enemy_prototype != null else default_encounter
 
 
 func _on_host_pressed() -> void:

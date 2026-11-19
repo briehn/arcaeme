@@ -77,7 +77,11 @@ func card_data(copy_id: int) -> CardData:
 
 
 func enemy_attack_damage() -> int:
-	return _encounter.enemy_attack + enemy_strength
+	var pattern := _encounter.enemy_attack_pattern
+	var base_damage := _encounter.enemy_attack
+	if not pattern.is_empty():
+		base_damage = maxi(0, pattern[(round_number - 1) % pattern.size()])
+	return base_damage + enemy_strength
 
 
 func can_play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bool:

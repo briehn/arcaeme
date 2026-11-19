@@ -3,13 +3,17 @@ param(
     [ValidateRange(1024, 65530)] [int]$BasePort = 27100,
     [ValidateRange(2, 4)] [int[]]$PartySizes = @(2, 3, 4),
     [switch]$Native,
-    [ValidateSet('statuses', 'modifiers')] [string]$Playtest = 'statuses'
+    [ValidateSet('statuses', 'modifiers', 'enemies')] [string]$Playtest = 'statuses'
 )
 
 $ErrorActionPreference = 'Stop'
 $engine = (Resolve-Path -LiteralPath $Godot).Path
 $project = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$fixtureScript = if ($Playtest -eq 'modifiers') { 'network_modifiers_integration.gd' } else { 'network_status_integration.gd' }
+$fixtureScript = switch ($Playtest) {
+    'modifiers' { 'network_modifiers_integration.gd' }
+    'enemies' { 'network_enemy_patterns_integration.gd' }
+    default { 'network_status_integration.gd' }
+}
 $logFolder = Join-Path $env:TEMP ("arcaeme-network-$Playtest-test-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $logFolder | Out-Null
 

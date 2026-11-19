@@ -8,6 +8,8 @@ const CardData = preload("res://scripts/combat/card_data.gd")
 @export var enemy_name: String
 @export var enemy_max_hp: int
 @export var enemy_attack: int
+## Optional nonnegative base attacks, repeating from round one. Empty uses enemy_attack.
+@export var enemy_attack_pattern: PackedInt32Array
 @export var shuffle_seed: int
 @export var test_deck: Array[CardData] = []
 ## Provisional attack payloads applied to living targets after direct damage.

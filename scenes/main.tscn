@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://bs50xfankguih"]
 
 [ext_resource type="Script" uid="uid://bemys4nptuxkq" path="res://scripts/main.gd" id="1_o5qli"]
+[ext_resource type="Script" path="res://scripts/ui/enemy_playtest_selector.gd" id="2_enemy_selector"]
 
 [node name="Main" type="Control" unique_id=1487196654]
 layout_mode = 3
@@ -56,9 +57,24 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Start Strength & Dexterity Test"
 
+[node name="EnemyPrototypeControls" type="HBoxContainer" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="EnemyPlaytest" type="OptionButton" parent="CenterContainer/VBoxContainer/EnemyPrototypeControls"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+script = ExtResource("2_enemy_selector")
+
+[node name="StartEnemyPlaytestButton" type="Button" parent="CenterContainer/VBoxContainer/EnemyPrototypeControls"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Start Enemy Prototype"
+
 [connection signal="pressed" from="CenterContainer/VBoxContainer/Button" to="." method="_on_button_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartRunButton" to="." method="_on_start_run_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartLocalCoopButton" to="." method="_on_start_local_coop_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartNetworkCoopButton" to="." method="_on_start_network_coop_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartStatusPlaytestButton" to="." method="_on_start_status_playtest_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartModifierPlaytestButton" to="." method="_on_start_modifier_playtest_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/EnemyPrototypeControls/StartEnemyPlaytestButton" to="." method="_on_start_enemy_playtest_pressed"]
