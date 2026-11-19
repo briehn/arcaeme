@@ -1,11 +1,11 @@
-[gd_resource type="Resource" format=3]
+[gd_resource type="Resource" format=3 uid="uid://c3f1uxrgbpak7"]
 
-[ext_resource type="Script" path="res://scripts/combat/encounter_data.gd" id="1_encounter"]
-[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="2_card"]
-[ext_resource type="Resource" path="res://resources/prototype/cards/basic_strike.tres" id="3_basic_strike"]
-[ext_resource type="Resource" path="res://resources/prototype/cards/basic_block.tres" id="4_basic_block"]
-[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_guard.tres" id="5_arcane_guard"]
-[ext_resource type="Resource" path="res://resources/prototype/cards/shieldstrike.tres" id="6_shieldstrike"]
+[ext_resource type="Script" uid="uid://bkis7k5xgairu" path="res://scripts/combat/encounter_data.gd" id="1_encounter"]
+[ext_resource type="Script" uid="uid://cp02ohva88j6g" path="res://scripts/combat/card_data.gd" id="2_card"]
+[ext_resource type="Resource" uid="uid://ddckuvgakcsl8" path="res://resources/prototype/cards/basic_strike.tres" id="3_basic_strike"]
+[ext_resource type="Resource" uid="uid://cnssm62qq2dsp" path="res://resources/prototype/cards/basic_block.tres" id="4_basic_block"]
+[ext_resource type="Resource" uid="uid://e5yyppa6kj43" path="res://resources/prototype/cards/arcane_guard.tres" id="5_arcane_guard"]
+[ext_resource type="Resource" uid="uid://cgfhmr5p1ofhp" path="res://resources/prototype/cards/shieldstrike.tres" id="6_shieldstrike"]
 [ext_resource type="Resource" path="res://resources/prototype/cards/battle_preparation.tres" id="7_battle_preparation"]
 [ext_resource type="Resource" path="res://resources/prototype/cards/arcane_reversal.tres" id="8_arcane_reversal"]
 
@@ -17,22 +17,4 @@ enemy_name = "Training Golem"
 enemy_max_hp = 34
 enemy_attack = 9
 shuffle_seed = 104774
-test_deck = Array[ExtResource("2_card")]([
-	ExtResource("3_basic_strike"),
-	ExtResource("3_basic_strike"),
-	ExtResource("3_basic_strike"),
-	ExtResource("3_basic_strike"),
-	ExtResource("3_basic_strike"),
-	ExtResource("4_basic_block"),
-	ExtResource("4_basic_block"),
-	ExtResource("4_basic_block"),
-	ExtResource("4_basic_block"),
-	ExtResource("5_arcane_guard"),
-	ExtResource("5_arcane_guard"),
-	ExtResource("6_shieldstrike"),
-	ExtResource("6_shieldstrike"),
-	ExtResource("7_battle_preparation"),
-	ExtResource("7_battle_preparation"),
-	ExtResource("8_arcane_reversal"),
-	ExtResource("8_arcane_reversal")
-])
+test_deck = Array[ExtResource("2_card")]([ExtResource("3_basic_strike"), ExtResource("3_basic_strike"), ExtResource("3_basic_strike"), ExtResource("3_basic_strike"), ExtResource("3_basic_strike"), ExtResource("4_basic_block"), ExtResource("4_basic_block"), ExtResource("4_basic_block"), ExtResource("4_basic_block"), ExtResource("5_arcane_guard"), ExtResource("5_arcane_guard"), ExtResource("6_shieldstrike"), ExtResource("6_shieldstrike"), ExtResource("7_battle_preparation"), ExtResource("7_battle_preparation"), ExtResource("8_arcane_reversal"), ExtResource("8_arcane_reversal")])

@@ -31,17 +31,17 @@ horizontal_alignment = 1
 layout_mode = 2
 text = "Start Combat"
 
-[node name="StartRunButton" type="Button" parent="CenterContainer/VBoxContainer"]
+[node name="StartRunButton" type="Button" parent="CenterContainer/VBoxContainer" unique_id=1884829980]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Start Prototype Run"
 
-[node name="StartLocalCoopButton" type="Button" parent="CenterContainer/VBoxContainer"]
+[node name="StartLocalCoopButton" type="Button" parent="CenterContainer/VBoxContainer" unique_id=1676790223]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Start Local Co-op Test"
 
-[node name="StartNetworkCoopButton" type="Button" parent="CenterContainer/VBoxContainer"]
+[node name="StartNetworkCoopButton" type="Button" parent="CenterContainer/VBoxContainer" unique_id=1189372291]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Start Network Co-op Test"

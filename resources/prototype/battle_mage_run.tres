@@ -1,14 +1,21 @@
-[gd_resource type="Resource" format=3]
+[gd_resource type="Resource" format=3 uid="uid://c7yddmptk45ia"]
 
-[ext_resource type="Script" path="res://scripts/run/run_data.gd" id="1_run"]
-[ext_resource type="Script" path="res://scripts/combat/encounter_data.gd" id="2_encounter"]
-[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="3_card"]
-[ext_resource type="Resource" path="res://resources/prototype/cards/basic_strike.tres" id="4_strike"]
-[ext_resource type="Resource" path="res://resources/prototype/cards/basic_block.tres" id="5_block"]
-[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_guard.tres" id="6_guard"]
-[ext_resource type="Resource" path="res://resources/prototype/cards/battle_preparation.tres" id="7_prep"]
-[ext_resource type="Resource" path="res://resources/prototype/cards/shieldstrike.tres" id="8_shieldstrike"]
-[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_reversal.tres" id="9_reversal"]
+[ext_resource type="Script" uid="uid://chmp715fm5ak1" path="res://scripts/run/run_data.gd" id="1_run"]
+[ext_resource type="Script" uid="uid://bkis7k5xgairu" path="res://scripts/combat/encounter_data.gd" id="2_encounter"]
+[ext_resource type="Script" uid="uid://cp02ohva88j6g" path="res://scripts/combat/card_data.gd" id="3_card"]
+[ext_resource type="Resource" uid="uid://ddckuvgakcsl8" path="res://resources/prototype/cards/basic_strike.tres" id="4_strike"]
+[ext_resource type="Resource" uid="uid://cnssm62qq2dsp" path="res://resources/prototype/cards/basic_block.tres" id="5_block"]
+[ext_resource type="Resource" uid="uid://e5yyppa6kj43" path="res://resources/prototype/cards/arcane_guard.tres" id="6_guard"]
+[ext_resource type="Resource" uid="uid://ba5suqk5d6q48" path="res://resources/prototype/cards/battle_preparation.tres" id="7_prep"]
+[ext_resource type="Resource" uid="uid://cgfhmr5p1ofhp" path="res://resources/prototype/cards/shieldstrike.tres" id="8_shieldstrike"]
+[ext_resource type="Resource" uid="uid://lxrv3y1ipe32" path="res://resources/prototype/cards/arcane_reversal.tres" id="9_reversal"]
+
+[sub_resource type="Resource" id="CitadelWarden"]
+script = ExtResource("2_encounter")
+enemy_id = &"citadel_warden"
+enemy_name = "Citadel Warden"
+enemy_max_hp = 38
+enemy_attack = 10
 
 [sub_resource type="Resource" id="GateSentinel"]
 script = ExtResource("2_encounter")
@@ -24,30 +31,11 @@ enemy_name = "Rift Stalker"
 enemy_max_hp = 18
 enemy_attack = 10
 
-[sub_resource type="Resource" id="CitadelWarden"]
-script = ExtResource("2_encounter")
-enemy_id = &"citadel_warden"
-enemy_name = "Citadel Warden"
-enemy_max_hp = 38
-enemy_attack = 10
-
 [resource]
 script = ExtResource("1_run")
 run_seed = 104775
 player_max_hp = 36
-starting_deck = Array[ExtResource("3_card")]([
-	ExtResource("4_strike"),
-	ExtResource("4_strike"),
-	ExtResource("4_strike"),
-	ExtResource("4_strike"),
-	ExtResource("4_strike"),
-	ExtResource("5_block"),
-	ExtResource("5_block"),
-	ExtResource("5_block"),
-	ExtResource("5_block"),
-	ExtResource("6_guard"),
-	ExtResource("7_prep")
-])
+starting_deck = Array[ExtResource("3_card")]([ExtResource("4_strike"), ExtResource("4_strike"), ExtResource("4_strike"), ExtResource("4_strike"), ExtResource("4_strike"), ExtResource("5_block"), ExtResource("5_block"), ExtResource("5_block"), ExtResource("5_block"), ExtResource("6_guard"), ExtResource("7_prep")])
 opening_encounters = Array[ExtResource("2_encounter")]([SubResource("GateSentinel"), SubResource("RiftStalker")])
 boss_encounter = SubResource("CitadelWarden")
 reward_candidates = Array[ExtResource("3_card")]([ExtResource("8_shieldstrike"), ExtResource("9_reversal"), ExtResource("6_guard")])

@@ -16,7 +16,7 @@ script = ExtResource("1_view")
 [node name="Session" type="Node" parent="."]
 script = ExtResource("2_session")
 encounter = ExtResource("3_encounter")
-player_ids = Array[StringName]([&"Battle Mage 1", &"Battle Mage 2"])
+player_ids = Array[StringName]([&"Battle Mage 1", &"Battle Mage 2", &"Battle Mage 3", &"Battle Mage 4"])
 
 [node name="Layout" type="VBoxContainer" parent="."]
 layout_mode = 1
@@ -50,6 +50,14 @@ layout_mode = 2
 min_value = 1024.0
 max_value = 65535.0
 
+[node name="PartySizeLabel" type="Label" parent="Layout/ConnectionMargin/Connection/Controls"]
+layout_mode = 2
+text = "Host party size"
+
+[node name="PartySize" type="OptionButton" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+
 [node name="HostButton" type="Button" parent="Layout/ConnectionMargin/Connection/Controls"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -71,6 +79,12 @@ text = "Back to Menu"
 
 [node name="ConnectionStatus" type="Label" parent="Layout/ConnectionMargin/Connection"]
 unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="PartyRoster" type="Label" parent="Layout/ConnectionMargin/Connection"]
+unique_name_in_owner = true
+visible = false
 layout_mode = 2
 autowrap_mode = 3
 

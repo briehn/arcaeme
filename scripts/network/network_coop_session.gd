@@ -6,10 +6,12 @@ const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 signal changed
 signal command_result(sequence: int, result: int)
 
-enum Status { IDLE, HOSTING, JOINING, ACTIVE, DISCONNECTED }
+enum Status { IDLE, HOSTING, JOINING, WAITING, ACTIVE, DISCONNECTED }
 
 const LOOPBACK := "127.0.0.1"
 const DEFAULT_PORT := 24604
+const MIN_PARTY_SIZE := 2
+const MAX_PARTY_SIZE := 4
 const SERVER_ID := 1
 const JOIN_TIMEOUT_SECONDS := 5.0
 
@@ -18,6 +20,9 @@ const JOIN_TIMEOUT_SECONDS := 5.0
 
 var status := Status.IDLE
 var hosting := false
+var party_size := 0
+var local_player := ""
+var connected_players := PackedStringArray()
 var message := "Choose Host or Join. Both instances must use the same UDP port."
 var snapshot: Dictionary = {}
 
@@ -47,12 +52,12 @@ func _exit_tree() -> void:
 	_close_transport()
 
 
-func host(port: int = DEFAULT_PORT) -> Error:
-	return _open(port, true)
+func host(port: int = DEFAULT_PORT, seats: int = MIN_PARTY_SIZE) -> Error:
+	return _open(port, true, seats)
 
 
 func join(port: int = DEFAULT_PORT) -> Error:
-	return _open(port, false)
+	return _open(port, false, 0)
 
 
 func can_submit() -> bool:
@@ -67,25 +72,28 @@ func submit_end_turn() -> bool:
 	return _submit(Authority.Command.END_TURN)
 
 
-func _open(port: int, as_host: bool) -> Error:
+func _open(port: int, as_host: bool, seats: int) -> Error:
 	if _transport != null:
 		return ERR_ALREADY_IN_USE
 	if port < 1024 or port > 65535:
 		return ERR_INVALID_PARAMETER
 	hosting = as_host
+	party_size = 0
+	local_player = ""
+	connected_players.clear()
 	snapshot = {}
 	_authority = null
 	_assignments.clear()
 	_next_sequence = 0
 	_pending_sequence = 0
-	if hosting and not _valid_host_setup():
-		_disconnect("The host needs an encounter and distinct player IDs for each seat.")
+	if hosting and not _valid_host_setup(seats):
+		_disconnect("The host needs an encounter and distinct player IDs for the selected party size (2–4).")
 		return ERR_INVALID_PARAMETER
 	var peer := ENetMultiplayerPeer.new()
 	var error: Error
 	if hosting:
 		peer.set_bind_ip(LOOPBACK)
-		error = peer.create_server(port, player_ids.size() - 1)
+		error = peer.create_server(port, seats - 1)
 	else:
 		error = peer.create_client(LOOPBACK, port)
 	if error != OK:
@@ -93,23 +101,28 @@ func _open(port: int, as_host: bool) -> Error:
 		return error
 	_transport = peer
 	if hosting:
+		party_size = seats
 		_assignments[SERVER_ID] = player_ids[0]
 		status = Status.HOSTING
-		message = "Host · %s · Waiting on %s:%d" % [player_ids[0], LOOPBACK, port]
+		message = "Host · %s · Waiting for the party" % player_ids[0]
 	else:
 		status = Status.JOINING
 		message = "Connecting to %s:%d…" % [LOOPBACK, port]
 		_join_timer.start(JOIN_TIMEOUT_SECONDS)
 	_api.multiplayer_peer = _transport
-	changed.emit()
+	if hosting:
+		_publish_roster()
+	else:
+		changed.emit()
 	return OK
 
 
-func _valid_host_setup() -> bool:
-	if encounter == null or player_ids.size() < 2:
+func _valid_host_setup(seats: int) -> bool:
+	if encounter == null or seats < MIN_PARTY_SIZE or seats > MAX_PARTY_SIZE or seats > player_ids.size():
 		return false
-	for player_id in player_ids:
-		if player_id == &"" or player_ids.count(player_id) != 1:
+	var selected := player_ids.slice(0, seats)
+	for player_id in selected:
+		if player_id == &"" or selected.count(player_id) != 1:
 			return false
 	return true
 
@@ -117,35 +130,65 @@ func _valid_host_setup() -> bool:
 func _on_peer_connected(peer_id: int) -> void:
 	if not hosting or _transport == null or _assignments.has(peer_id):
 		return
-	if status != Status.HOSTING or _assignments.size() >= player_ids.size():
+	if status != Status.HOSTING or _assignments.size() >= party_size:
 		_transport.disconnect_peer(peer_id)
 		return
 	_assignments[peer_id] = player_ids[_assignments.size()]
-	if _assignments.size() == player_ids.size():
+	_publish_roster()
+	if _assignments.size() == party_size:
 		_transport.refuse_new_connections = true
 		_authority = Authority.new(encounter, _assignments)
 		_publish(0, 0)
 
 
+func _publish_roster() -> void:
+	var roster := PackedStringArray()
+	for player_id in _assignments.values():
+		roster.append(String(player_id))
+	for peer_id in _assignments:
+		var assigned := String(_assignments[peer_id])
+		if peer_id == SERVER_ID:
+			_apply_roster(assigned, party_size, roster)
+		else:
+			_receive_roster.rpc_id(peer_id, assigned, party_size, roster)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_roster(assigned: String, seats: int, roster: PackedStringArray) -> void:
+	if _from_host() and status in [Status.JOINING, Status.WAITING]:
+		_apply_roster(assigned, seats, roster)
+
+
+func _apply_roster(assigned: String, seats: int, roster: PackedStringArray) -> void:
+	local_player = assigned
+	party_size = seats
+	connected_players = roster
+	if not hosting:
+		_join_timer.stop()
+		status = Status.WAITING
+		message = "Client · %s · Waiting for the party" % local_player
+	changed.emit()
+
+
 func _on_connected_to_server() -> void:
 	if status == Status.JOINING:
-		message = "Connected to host · Waiting for the encounter."
+		message = "Connected to host · Waiting for seat assignment."
 		changed.emit()
 
 
 func _on_connection_failed() -> void:
 	if status == Status.JOINING:
-		_disconnect("Could not connect to the host on localhost. Check that the other instance is hosting on this port.")
+		_disconnect("Could not connect on localhost. Check the port and whether the host has an open seat.")
 
 
 func _on_peer_disconnected(peer_id: int) -> void:
 	if hosting and _assignments.has(peer_id) and _transport != null:
-		_disconnect("A client disconnected. The encounter has ended.")
+		_disconnect("%s disconnected. The session has ended." % _assignments[peer_id])
 
 
 func _on_server_disconnected() -> void:
 	if not hosting and _transport != null:
-		_disconnect("The host disconnected. The encounter has ended.")
+		_disconnect("The host disconnected. The session has ended.")
 
 
 func _disconnect(reason: String) -> void:
@@ -153,6 +196,7 @@ func _disconnect(reason: String) -> void:
 	_close_transport()
 	_authority = null
 	_assignments.clear()
+	connected_players.clear()
 	_pending_sequence = 0
 	status = Status.DISCONNECTED
 	message = reason
@@ -224,8 +268,12 @@ func _deliver(peer_id: int, sequence: int, result: int) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func _receive_snapshot(view: Dictionary, sequence: int, result: int) -> void:
-	if not hosting and _transport != null and _api.get_remote_sender_id() == SERVER_ID:
+	if _from_host() and status in [Status.WAITING, Status.ACTIVE] and view.get("viewer") == local_player:
 		_apply_snapshot(view, sequence, result)
+
+
+func _from_host() -> bool:
+	return not hosting and _transport != null and _api.get_remote_sender_id() == SERVER_ID
 
 
 func _apply_snapshot(view: Dictionary, sequence: int, result: int) -> void:
