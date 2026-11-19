@@ -16,6 +16,8 @@ class PlayerState:
 	var max_hp: int
 	var mana: int
 	var block: int
+	var strength: int
+	var dexterity: int
 	var poison: int
 	var burning: int
 	var next_attack_bonus: int
@@ -31,6 +33,8 @@ var phase: Phase = Phase.PLAYER
 var round_number: int
 var shuffle_seed: int
 var enemy_hp: int
+var enemy_strength: int
+var enemy_dexterity: int
 var enemy_poison: int
 var enemy_burning: int
 var players: Dictionary[StringName, PlayerState] = {}
@@ -49,6 +53,9 @@ func _init(encounter: EncounterData, encounter_seed: int, player_ids: Array[Stri
 	shuffle_seed = encounter_seed
 	_rng.seed = shuffle_seed
 	enemy_hp = _encounter.enemy_max_hp
+	# Only nonnegative modifier fixtures are supported until negative-stat rules are approved.
+	enemy_strength = maxi(0, _encounter.enemy_starting_strength)
+	enemy_dexterity = maxi(0, _encounter.enemy_starting_dexterity)
 	_log("Encounter started. Seed %d." % shuffle_seed)
 	for player_id in player_ids:
 		assert(not players.has(player_id), "Combat player IDs must be unique.")
@@ -67,6 +74,10 @@ func _init(encounter: EncounterData, encounter_seed: int, player_ids: Array[Stri
 
 func card_data(copy_id: int) -> CardData:
 	return _cards[copy_id]
+
+
+func enemy_attack_damage() -> int:
+	return _encounter.enemy_attack + enemy_strength
 
 
 func can_play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bool:
@@ -93,8 +104,11 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 			CardEffect.Kind.DAMAGE:
 				_deal_card_damage(player, card, effect)
 			CardEffect.Kind.GAIN_BLOCK:
-				player.block += effect.amount
-				_log("%s gained %d Block." % [player.id, effect.amount])
+				var block_gain := effect.amount
+				if block_gain > 0:
+					block_gain += player.dexterity
+				player.block += block_gain
+				_log("%s gained %d Block." % [player.id, block_gain])
 			CardEffect.Kind.DRAW:
 				_draw(player, effect.amount)
 			CardEffect.Kind.PREPARE_ATTACK:
@@ -104,6 +118,14 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 					player.id, player.next_attack_bonus])
 			CardEffect.Kind.APPLY_POISON, CardEffect.Kind.APPLY_BURNING:
 				_apply_card_status(effect)
+			CardEffect.Kind.GAIN_STRENGTH:
+				if effect.amount > 0:
+					player.strength += effect.amount
+					_log("%s gained %d Strength." % [player.id, effect.amount])
+			CardEffect.Kind.GAIN_DEXTERITY:
+				if effect.amount > 0:
+					player.dexterity += effect.amount
+					_log("%s gained %d Dexterity." % [player.id, effect.amount])
 	player.discard_pile.append(copy_id)
 	if enemy_hp == 0:
 		_resolve_victory()
@@ -159,6 +181,9 @@ func _deal_card_damage(player: PlayerState, card: CardData, effect: CardEffect) 
 		else:
 			_log("%s needs %d Block for bonus damage. %s has %d Block and spent none." % [
 				card.display_name, effect.block_to_spend, player.id, player.block])
+	if card.is_attack and player.strength > 0:
+		damage += player.strength
+		_log("%s added %d Attack damage from Strength." % [player.id, player.strength])
 	# TODO(design): Apply preparation once, to the first hit of the owner's next Attack.
 	if card.is_attack and player.next_attack_bonus > 0:
 		damage += player.next_attack_bonus
@@ -226,12 +251,13 @@ func _resolve_enemy_phase() -> void:
 		if enemy_hp == 0:
 			_resolve_victory()
 			return
-	_log("%s attacks for %d damage." % [_encounter.enemy_name, _encounter.enemy_attack])
+	var attack_damage := enemy_attack_damage()
+	_log("%s attacks for %d damage." % [_encounter.enemy_name, attack_damage])
 	for player: PlayerState in players.values():
 		if player.hp <= 0:
 			continue
-		var absorbed := mini(player.block, _encounter.enemy_attack)
-		var hp_lost := mini(player.hp, _encounter.enemy_attack - absorbed)
+		var absorbed := mini(player.block, attack_damage)
+		var hp_lost := mini(player.hp, attack_damage - absorbed)
 		player.block -= absorbed
 		player.hp -= hp_lost
 		_log("%s blocked %d and lost %d HP." % [player.id, absorbed, hp_lost])

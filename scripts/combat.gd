@@ -96,6 +96,7 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 	player_label.text = "\n".join(stats)
 	enemy_label.text = "%s   ·   HP %d/%d" % [
 		snapshot["enemy_name"], snapshot["enemy_hp"], snapshot["enemy_max_hp"]]
+	enemy_label.text += _modifier_counters(snapshot.get("enemy_strength", 0), snapshot.get("enemy_dexterity", 0))
 	enemy_label.text += _status_counters(snapshot.get("enemy_poison", 0), snapshot.get("enemy_burning", 0))
 	if in_combat:
 		var intent := "Attack all living players for %d damage each" if coop else "Attack for %d damage"
@@ -139,7 +140,17 @@ func _player_stats(player: Dictionary, show_turn_status: bool, phase: int) -> St
 		elif player.ended_turn:
 			status = "Turn ended"
 		stats += "   ·   " + status
+	stats += _modifier_counters(player.get("strength", 0), player.get("dexterity", 0))
 	return stats + _status_counters(player.get("poison", 0), player.get("burning", 0))
+
+
+func _modifier_counters(strength: int, dexterity: int) -> String:
+	var counters := ""
+	if strength > 0:
+		counters += "   ·   Strength %d" % strength
+	if dexterity > 0:
+		counters += "   ·   Dexterity %d" % dexterity
+	return counters
 
 
 func _status_counters(poison: int, burning: int) -> String:

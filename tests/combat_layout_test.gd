@@ -10,6 +10,7 @@ const LOCAL = preload("res://scenes/local_coop.tscn")
 const STATUS = preload("res://scenes/status_playtest.tscn")
 const RUN = preload("res://scenes/prototype_run.tscn")
 const ENCOUNTER = preload("res://resources/prototype/status_playtest/encounter.tres")
+const MODIFIER_ENCOUNTER = preload("res://resources/prototype/modifier_playtest/encounter.tres")
 const REVERSAL = preload("res://resources/prototype/cards/arcane_reversal.tres")
 const NAMES: Array[StringName] = [&"Battle Mage 1", &"Battle Mage 2", &"Battle Mage 3", &"Battle Mage 4"]
 const VIEWPORT_SIZES := [Vector2i(1280, 720), Vector2i(1920, 1080), Vector2i(960, 540)]
@@ -98,19 +99,26 @@ func _test_network() -> void:
 	var session: NetworkSession = scene.get_node("Session")
 	var short_run := _control(scene, "%ShortRun") as CheckBox
 	var status_playtest := _control(scene, "%StatusPlaytest") as CheckBox
+	var modifier_playtest := _control(scene, "%ModifierPlaytest") as CheckBox
 	var party := _control(scene, "%PartySize") as OptionButton
 	var port := _control(scene, "%Port") as SpinBox
 	_check(port.editable and not party.disabled and party.item_count == 3, "lobby port and party size are usable")
-	for path in ["%Port", "%PartySize", "%ShortRun", "%StatusPlaytest", "%HostButton", "%JoinButton", "%LeaveButton"]:
+	for path in ["%Port", "%PartySize", "%ShortRun", "%StatusPlaytest", "%ModifierPlaytest",
+			"%HostButton", "%JoinButton", "%LeaveButton"]:
 		_check_control(_control(scene, path), "network lobby")
 	if await _reach(status_playtest):
 		_click(status_playtest)
 		await _settle()
 	_check(session.encounter == ENCOUNTER and status_playtest.button_pressed, "status option handles viewport input")
+	if await _reach(modifier_playtest):
+		_click(modifier_playtest)
+		await _settle()
+	_check(session.encounter == MODIFIER_ENCOUNTER and modifier_playtest.button_pressed and
+		not status_playtest.button_pressed, "modifier option selects a separate fixture through viewport input")
 	if await _reach(short_run):
 		_click(short_run)
 		await _settle()
-	_check(status_playtest.disabled and not status_playtest.button_pressed and "Short Run" in
+	_check(status_playtest.disabled and modifier_playtest.disabled and not modifier_playtest.button_pressed and "Short Run" in
 		(_control(scene, "%HostButton") as Button).text, "short-run option updates lobby mode and status availability")
 
 	var combat := _control(scene, "%CombatSlot").get_node("Combat") as Control

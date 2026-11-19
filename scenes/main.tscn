@@ -51,8 +51,14 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Start Poison & Burning Test"
 
+[node name="StartModifierPlaytestButton" type="Button" parent="CenterContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Start Strength & Dexterity Test"
+
 [connection signal="pressed" from="CenterContainer/VBoxContainer/Button" to="." method="_on_button_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartRunButton" to="." method="_on_start_run_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartLocalCoopButton" to="." method="_on_start_local_coop_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartNetworkCoopButton" to="." method="_on_start_network_coop_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartStatusPlaytestButton" to="." method="_on_start_status_playtest_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/StartModifierPlaytestButton" to="." method="_on_start_modifier_playtest_pressed"]

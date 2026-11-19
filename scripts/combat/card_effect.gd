@@ -1,6 +1,6 @@
 extends Resource
 
-enum Kind { DAMAGE, GAIN_BLOCK, DRAW, PREPARE_ATTACK, APPLY_POISON, APPLY_BURNING }
+enum Kind { DAMAGE, GAIN_BLOCK, DRAW, PREPARE_ATTACK, APPLY_POISON, APPLY_BURNING, GAIN_STRENGTH, GAIN_DEXTERITY }
 
 @export var kind: Kind
 @export var amount: int
@@ -35,4 +35,8 @@ func describe() -> String:
 			return "Apply %d Poison." % amount
 		Kind.APPLY_BURNING:
 			return "Apply %d Burning." % amount
+		Kind.GAIN_STRENGTH:
+			return "Gain %d Strength." % amount
+		Kind.GAIN_DEXTERITY:
+			return "Gain %d Dexterity." % amount
 	return ""

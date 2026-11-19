@@ -1,0 +1,68 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/encounter_data.gd" id="1_encounter"]
+[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="2_card"]
+[ext_resource type="Script" path="res://scripts/combat/card_effect.gd" id="3_effect"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/shieldstrike.tres" id="4_shieldstrike"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_reversal.tres" id="5_reversal"]
+
+[sub_resource type="Resource" id="Strength"]
+script = ExtResource("3_effect")
+kind = 6
+amount = 2
+
+[sub_resource type="Resource" id="Dexterity"]
+script = ExtResource("3_effect")
+kind = 7
+amount = 2
+
+[sub_resource type="Resource" id="FocusBlock"]
+script = ExtResource("3_effect")
+kind = 1
+amount = 2
+
+[sub_resource type="Resource" id="Guard"]
+script = ExtResource("3_effect")
+kind = 1
+amount = 3
+
+[sub_resource type="Resource" id="Hit"]
+script = ExtResource("3_effect")
+kind = 0
+amount = 3
+
+[sub_resource type="Resource" id="BattleFocus"]
+script = ExtResource("2_card")
+id = &"test_battle_focus"
+display_name = "Test Battle Focus"
+mana_cost = 1
+approval_status = "Provisional test card"
+effects = Array[ExtResource("3_effect")]([SubResource("Strength"), SubResource("Dexterity"), SubResource("FocusBlock")])
+
+[sub_resource type="Resource" id="TwinStrike"]
+script = ExtResource("2_card")
+id = &"test_twin_strike"
+display_name = "Test Twin Strike"
+mana_cost = 1
+approval_status = "Provisional test card"
+is_attack = true
+effects = Array[ExtResource("3_effect")]([SubResource("Hit"), SubResource("Hit")])
+
+[sub_resource type="Resource" id="DoubleGuard"]
+script = ExtResource("2_card")
+id = &"test_double_guard"
+display_name = "Test Double Guard"
+mana_cost = 1
+approval_status = "Provisional test card"
+effects = Array[ExtResource("3_effect")]([SubResource("Guard"), SubResource("Guard")])
+
+[resource]
+script = ExtResource("1_encounter")
+player_max_hp = 36
+enemy_id = &"training_golem"
+enemy_name = "Training Golem"
+enemy_max_hp = 60
+enemy_attack = 9
+enemy_starting_strength = 2
+shuffle_seed = 104774
+test_deck = Array[ExtResource("2_card")]([SubResource("BattleFocus"), SubResource("TwinStrike"), SubResource("DoubleGuard"), ExtResource("4_shieldstrike"), ExtResource("5_reversal")])

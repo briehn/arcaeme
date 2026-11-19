@@ -18,3 +18,7 @@ func _on_start_network_coop_pressed() -> void:
 
 func _on_start_status_playtest_pressed() -> void:
 	get_tree().change_scene_to_file("res://scenes/status_playtest.tscn")
+
+
+func _on_start_modifier_playtest_pressed() -> void:
+	get_tree().change_scene_to_file("res://scenes/modifier_playtest.tscn")

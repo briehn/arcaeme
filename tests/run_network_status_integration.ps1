@@ -2,13 +2,15 @@ param(
     [Parameter(Mandatory)] [string]$Godot,
     [ValidateRange(1024, 65530)] [int]$BasePort = 27100,
     [ValidateRange(2, 4)] [int[]]$PartySizes = @(2, 3, 4),
-    [switch]$Native
+    [switch]$Native,
+    [ValidateSet('statuses', 'modifiers')] [string]$Playtest = 'statuses'
 )
 
 $ErrorActionPreference = 'Stop'
 $engine = (Resolve-Path -LiteralPath $Godot).Path
 $project = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$logFolder = Join-Path $env:TEMP ('arcaeme-network-status-test-' + [Guid]::NewGuid().ToString('N'))
+$fixtureScript = if ($Playtest -eq 'modifiers') { 'network_modifiers_integration.gd' } else { 'network_status_integration.gd' }
+$logFolder = Join-Path $env:TEMP ("arcaeme-network-$Playtest-test-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $logFolder | Out-Null
 
 function Start-Participant([int]$Port, [int]$Size, [int]$Seat, [string]$ReleasePath) {
@@ -16,7 +18,7 @@ function Start-Participant([int]$Port, [int]$Size, [int]$Seat, [string]$ReleaseP
     $arguments = @()
     if (-not $Native) { $arguments += '--headless' }
     $arguments += @('--path', ('"' + $project + '"'), '--log-file', ('"' + $prefix + '.log"'),
-        '--script', 'res://tests/network_status_integration.gd', '--', $Port, $Size, $Seat,
+        '--script', "res://tests/$fixtureScript", '--', $Port, $Size, $Seat,
         ('"' + $ReleasePath + '"'))
     $process = Start-Process -FilePath $engine -ArgumentList $arguments -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput "$prefix.stdout" -RedirectStandardError "$prefix.stderr"
@@ -48,7 +50,7 @@ function Test-Party([int]$Size, [int]$Port) {
         $baseline = Wait-Marker $participants[0] '^RESULT '
         foreach ($participant in ($participants | Select-Object -Skip 1)) {
             if ((Wait-Marker $participant '^RESULT ') -ne $baseline) {
-                throw "Status snapshots disagreed for the $Size-player encounter. Logs in $logFolder."
+                throw "Public snapshots disagreed for the $Size-player $Playtest encounter. Logs in $logFolder."
             }
         }
         New-Item -ItemType File -Path $releasePath | Out-Null
@@ -62,7 +64,7 @@ function Test-Party([int]$Size, [int]$Port) {
             }
         }
         $mode = if ($Native) { 'native' } else { 'headless' }
-        Write-Output ("$Size-player statuses ($mode) passed · " + $baseline.Substring(7))
+        Write-Output ("$Size-player $Playtest ($mode) passed · " + $baseline.Substring(7))
     } finally {
         foreach ($participant in $participants) {
             if (-not $participant.Process.HasExited) { Stop-Process -Id $participant.Process.Id }

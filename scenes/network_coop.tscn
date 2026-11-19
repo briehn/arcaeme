@@ -78,6 +78,12 @@ layout_mode = 2
 tooltip_text = "Use provisional status cards and attack effects in the standalone encounter."
 text = "Poison & Burning (Prototype)"
 
+[node name="ModifierPlaytest" type="CheckBox" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Use the provisional Strength and Dexterity cards in the standalone encounter."
+text = "Strength & Dexterity (Prototype)"
+
 [node name="HostButton" type="Button" parent="Layout/ConnectionMargin/Connection/Controls"]
 unique_name_in_owner = true
 layout_mode = 2

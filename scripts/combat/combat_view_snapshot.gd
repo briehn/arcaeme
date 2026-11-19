@@ -12,6 +12,7 @@ static func build(state: CombatState, encounter: EncounterData, viewer: StringNa
 			"id": String(player.id), "hp": player.hp, "max_hp": player.max_hp,
 			"mana": player.mana, "block": player.block, "next_attack_bonus": player.next_attack_bonus,
 			"poison": player.poison, "burning": player.burning,
+			"strength": player.strength, "dexterity": player.dexterity,
 			"ended_turn": player.ended_turn, "recovered": player.recovered_after_victory,
 		})
 	var local := state.players[viewer]
@@ -29,9 +30,10 @@ static func build(state: CombatState, encounter: EncounterData, viewer: StringNa
 		"revision": state.action_history.size(), "players": public_players,
 		"enemy_name": encounter.enemy_name, "enemy_hp": state.enemy_hp, "enemy_max_hp": encounter.enemy_max_hp,
 		"enemy_poison": state.enemy_poison, "enemy_burning": state.enemy_burning,
+		"enemy_strength": state.enemy_strength, "enemy_dexterity": state.enemy_dexterity,
 		"enemy_poison_per_attack": encounter.enemy_poison_per_attack,
 		"enemy_burning_per_attack": encounter.enemy_burning_per_attack,
-		"enemy_attack": encounter.enemy_attack, "hand": hand, "draw_count": local.draw_pile.size(),
+		"enemy_attack": state.enemy_attack_damage(), "hand": hand, "draw_count": local.draw_pile.size(),
 		"discard_count": local.discard_pile.size(), "can_end_turn": state.can_end_turn(viewer),
 		# The first resolver log line contains the seed. Publish only the subsequent combat events.
 		"log": state.combat_log if show_seed else state.combat_log.slice(1),
