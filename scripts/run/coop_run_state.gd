@@ -72,6 +72,8 @@ func submit_reward(player_id: StringName, card_id: StringName) -> bool:
 
 func view_fields(player_id: StringName) -> Dictionary:
 	var view := {"run_stage": stage, "encounter_id": encounter_id, "run_deck_count": _decks[player_id].size()}
+	if not _data.title.is_empty():
+		view["run_title"] = _data.title
 	if stage == REWARD:
 		var submitted := _submitted.has(player_id)
 		var options: Array[Dictionary] = []

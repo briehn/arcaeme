@@ -15,6 +15,10 @@ func _on_start_run_pressed() -> void:
 	get_tree().change_scene_to_file("res://scenes/prototype_run.tscn")
 
 
+func _on_start_enemy_variety_run_pressed() -> void:
+	get_tree().change_scene_to_file("res://scenes/enemy_variety_run.tscn")
+
+
 func _on_start_local_coop_pressed() -> void:
 	get_tree().change_scene_to_file("res://scenes/local_coop.tscn")
 

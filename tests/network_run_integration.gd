@@ -7,6 +7,7 @@ const RunData = preload("res://scripts/run/run_data.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const CardData = preload("res://scripts/combat/card_data.gd")
 const DATA = preload("res://resources/prototype/battle_mage_run.tres")
+const VARIETY = preload("res://resources/prototype/enemy_variety_run.tres")
 const STRIKE = preload("res://resources/prototype/cards/basic_strike.tres")
 const BLOCK = preload("res://resources/prototype/cards/basic_block.tres")
 const PREPARATION = preload("res://resources/prototype/cards/battle_preparation.tres")
@@ -18,6 +19,7 @@ const NETWORK := "res://scenes/network_coop.tscn"
 
 var _session: NetworkSession
 var _scenario: String
+var _enemy_variety := false
 var _size: int
 var _seat: int
 var _actor: String
@@ -45,6 +47,8 @@ var _probe_index := 0
 var _probe_result := -1
 var _probe_revision: int
 var _probe_sequence: int
+var _variety_revisions := PackedStringArray()
+var _drew_reward := false
 
 
 func _initialize() -> void:
@@ -57,6 +61,7 @@ func _start() -> void:
 		_fail("Expected scenario, port, party size, seat and barrier prefix.")
 		return
 	_scenario = args[0]
+	_enemy_variety = _scenario.begins_with("enemy-variety-")
 	_size = int(args[2])
 	_seat = int(args[3])
 	_actor = "Battle Mage %d" % _seat
@@ -88,6 +93,15 @@ func _start() -> void:
 			_fail("The short run should be opt-in from the network menu.")
 			return
 		short_run.button_pressed = true
+		if _enemy_variety:
+			var variety: CheckBox = current_scene.get_node("%EnemyVarietyRun")
+			if variety.button_pressed or variety.disabled or not variety.is_visible_in_tree():
+				_fail("The enemy variety route should be an available opt-in after enabling Short Run.")
+				return
+			variety.button_pressed = true
+			if _session.run_data != VARIETY or (_control("%HostButton") as Button).text != "Host Enemy Variety Run":
+				_fail("The lobby did not select the actual enemy variety fixture.")
+				return
 	var launch: Button = current_scene.get_node("%HostButton" if _seat == 1 else "%JoinButton")
 	launch.pressed.emit()
 	while not _finished:
@@ -122,6 +136,8 @@ func _observe_session() -> void:
 	if _session.status == NetworkSession.Status.ACTIVE:
 		var view := _session.snapshot
 		if not _check_private_view(view):
+			return
+		if _enemy_variety and not _check_variety_view(view):
 			return
 		if view.run_stage == "opening" and not _opening_seen:
 			_opening_seen = _check_opening(view)
@@ -203,10 +219,54 @@ func _check_private_view(view: Dictionary) -> bool:
 	return true
 
 
+func _check_variety_view(view: Dictionary) -> bool:
+	var encounter: EncounterData = VARIETY.opening_encounters[0] if view.encounter_id == 1 else VARIETY.boss_encounter
+	var pattern := encounter.enemy_attack_pattern
+	var expected_attack := pattern[(int(view.round) - 1) % pattern.size()]
+	var stage_label: Label = _control("%RunStage")
+	if (view.get("run_title") != VARIETY.title or VARIETY.title not in stage_label.text
+			or view.enemy_name != encounter.enemy_name or view.enemy_attack != expected_attack):
+		_fail("The alternative route title, enemy, or advertised intent did not survive the host snapshot.")
+		return false
+	if view.phase == CombatState.Phase.PLAYER:
+		var enemy_label: Label = _combat().get_node("%EnemyLabel")
+		if ("Attack all living players for %d damage each" % expected_attack) not in enemy_label.text:
+			_fail("The visible intent does not match the advertised pattern amount.")
+			return false
+	var attacks := 0
+	for entry in view.log:
+		if entry.begins_with(encounter.enemy_name + " attacks for "):
+			if entry != "%s attacks for %d damage." % [encounter.enemy_name, pattern[attacks % pattern.size()]]:
+				_fail("Resolved attacks diverged from the enemy's pattern.")
+				return false
+			attacks += 1
+	if view.phase != CombatState.Phase.DEFEAT and attacks != view.round - 1:
+		_fail("An attack resolved early or a previous round's attack is missing.")
+		return false
+	var expected_deck_count := _deck_size + int(view.encounter_id == 2 and not _chosen_reward.is_empty())
+	if not _check_hand_ids(view, expected_deck_count):
+		return false
+	for card in view.hand:
+		var copy: int = card.copy
+		var expected_id := _chosen_reward if copy == _deck_size else String(VARIETY.starting_deck[copy].id)
+		if card.id != expected_id:
+			_fail("The private hand diverged from this player's starting deck and chosen reward.")
+			return false
+		_drew_reward = _drew_reward or copy == _deck_size
+	if view.run_revision > _variety_revisions.size():
+		_fail("A peer missed a public run revision.")
+		return false
+	if view.run_revision == _variety_revisions.size():
+		_variety_revisions.append(JSON.stringify([_public_digest(view), view.run_title, view.enemy_name,
+			view.enemy_attack, view.get("reward_ready", -1)]))
+	return true
+
+
 func _check_opening(view: Dictionary) -> bool:
-	var enemy_hp := 6 if _scenario == "mixed" else DATA.opening_encounters[0].enemy_max_hp
+	var opening: EncounterData = VARIETY.opening_encounters[0] if _enemy_variety else DATA.opening_encounters[0]
+	var enemy_hp := 6 if _scenario == "mixed" else opening.enemy_max_hp
 	if view.encounter_id != 1 or view.revision != 0 or view.run_revision != 0 or view.round != 1 or \
-			view.enemy_name != DATA.opening_encounters[0].enemy_name or view.enemy_hp != enemy_hp or \
+			view.enemy_name != opening.enemy_name or view.enemy_hp != enemy_hp or \
 			view.run_deck_count != _deck_size or view.has("reward_options") or \
 			not _control("%CombatSlot").visible or _control("%RewardPanel").visible:
 		_fail("The configured opening encounter or fresh starting deck was not shown.")
@@ -270,6 +330,13 @@ func _drive_combat(view: Dictionary) -> void:
 		if view.round > 1:
 			_play_by_id(view, "battle_preparation" if view.players[0].next_attack_bonus == 0 else "basic_strike")
 			return
+	elif _enemy_variety and view.round <= 2:
+		# Let both enemy cycles reach their third advertised step. The host blocks to produce unequal carried HP.
+		if (_seat == 1 or view.run_stage == "boss") and view.players[_seat - 1].block < view.enemy_attack:
+			for card in view.hand:
+				if card.playable and card.id in ["basic_block", "arcane_guard", "battle_preparation"]:
+					_play_card(card)
+					return
 	else:
 		var deal_damage: bool = view.run_stage == "boss" and _scenario != "skip" or \
 				view.run_stage == "opening" and (_scenario == "skip" or view.round > 1)
@@ -319,6 +386,9 @@ func _check_opening_victory(view: Dictionary) -> bool:
 			if view.players[index].recovered != (index > 0):
 				_fail("Opening recovery flags identified the wrong players.")
 				return false
+	elif _enemy_variety and (view.round < 3 or _opening_hp[0] <= _opening_hp[1]):
+		_fail("The opening did not demonstrate the Goblin cycle and distinguish carried HP by seat.")
+		return false
 	return true
 
 
@@ -337,7 +407,7 @@ func _drive_reward(view: Dictionary) -> void:
 	if _reward_clicked or view.reward_submitted or order[view.reward_ready] != _seat or \
 			(_scenario == "reward-disconnect" and view.reward_ready > 0):
 		return
-	if _scenario == "take" or (_scenario == "mixed" and _seat % 2 == 0):
+	if _scenario == "take" or ((_scenario == "mixed" or _enemy_variety) and _seat % 2 == 0):
 		var index := (_seat - 1) % (view.reward_options as Array).size()
 		_chosen_reward = view.reward_options[index].id
 		_reward_clicked = true
@@ -431,16 +501,18 @@ func _drive_boss(view: Dictionary) -> void:
 
 
 func _check_boss_start(view: Dictionary) -> bool:
-	var enemy_hp := 6 if _scenario == "mixed" else DATA.boss_encounter.enemy_max_hp
+	var run: RunData = VARIETY if _enemy_variety else DATA
+	var enemy_hp := 6 if _scenario == "mixed" else run.boss_encounter.enemy_max_hp
 	var expected_deck_size := _deck_size + int(not _chosen_reward.is_empty())
 	var stage_label: Label = current_scene.get_node("%RunStage")
+	var stage_title := "Final Encounter" if _enemy_variety else "Boss"
 	if not _reward_seen or not _reward_clicked or view.encounter_id != 2 or view.revision != 0 or \
 			view.run_revision != _opening_revision + _size or view.round != 1 or view.phase != CombatState.Phase.PLAYER or \
-			view.enemy_name != DATA.boss_encounter.enemy_name or view.enemy_hp != enemy_hp or \
+			view.enemy_name != run.boss_encounter.enemy_name or view.enemy_hp != enemy_hp or \
 			view.run_deck_count != expected_deck_size or view.discard_count != 0 or \
 			view.hand.size() != mini(5, expected_deck_size) or view.hand.size() + view.draw_count != expected_deck_size or \
-			view.has("reward_options") or DATA.opening_encounters[0].enemy_name in "\n".join(view.log) or \
-			not _control("%CombatSlot").visible or _control("%RewardPanel").visible or "Boss" not in stage_label.text:
+			view.has("reward_options") or run.opening_encounters[0].enemy_name in "\n".join(view.log) or \
+			not _control("%CombatSlot").visible or _control("%RewardPanel").visible or stage_title not in stage_label.text:
 		_fail("The fresh boss snapshot carried the wrong encounter ID, revision, deck, combat state or UI.")
 		return false
 	if not _check_hand_ids(view, expected_deck_size):
@@ -477,7 +549,7 @@ func _report_outcome(view: Dictionary) -> void:
 	var expected_phase := CombatState.Phase.DEFEAT if expected == "defeat" else CombatState.Phase.VICTORY
 	var label: Label = current_scene.get_node("%RunStage")
 	var title := "Run Defeat" if expected == "defeat" else "Run Victory"
-	if _scenario not in ["take", "skip", "mixed"] or not _boss_reported or view.encounter_id != 2 or \
+	if (_scenario not in ["take", "skip", "mixed"] and not _enemy_variety) or not _boss_reported or view.encounter_id != 2 or \
 			view.run_stage != expected or view.phase != expected_phase or title not in label.text or \
 			not (_combat().get_node("%EndTurnButton") as Button).disabled or _control("%RewardPanel").visible:
 		_fail("Unexpected terminal run state or active UI at the end of the run.")
@@ -486,7 +558,19 @@ func _report_outcome(view: Dictionary) -> void:
 		if (player.hp == 0) != (expected == "defeat"):
 			_fail("Terminal HP disagrees with the reported party outcome.")
 			return
-	_report("%s · encounter %d · round %d · %s" % [title, view.encounter_id, view.round, _public_digest(view)])
+	if _enemy_variety:
+		if view.round < 3 or (not _chosen_reward.is_empty() and not _drew_reward):
+			_fail("The party concluded before exercising the Treant cycle and drawing the chosen private reward.")
+			return
+		var carried_hp := PackedStringArray()
+		var final_hp := PackedStringArray()
+		for index in _size:
+			carried_hp.append(str(_opening_hp[index]))
+			final_hp.append(str(view.players[index].hp))
+		_report("%s · Goblin to Treant · round %d · HP carried %s · final %s · %s" % [
+			title, view.round, "/".join(carried_hp), "/".join(final_hp), "\n".join(_variety_revisions).sha256_text()])
+	else:
+		_report("%s · encounter %d · round %d · %s" % [title, view.encounter_id, view.round, _public_digest(view)])
 
 
 func _report_disconnect() -> void:

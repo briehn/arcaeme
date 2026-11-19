@@ -5,6 +5,7 @@ const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const BATTLE_MAGE := &"battle_mage"
 
 @export_group("Provisional Battle Mage Run")
+@export var title: String
 @export var run_seed: int
 @export var player_max_hp: int
 @export var starting_deck: Array[CardData] = []

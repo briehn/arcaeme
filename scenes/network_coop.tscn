@@ -73,6 +73,13 @@ layout_mode = 2
 tooltip_text = "Host an opening encounter, personal card rewards, and a boss."
 text = "Short Run (Prototype)"
 
+[node name="EnemyVarietyRun" type="CheckBox" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+disabled = true
+text = "Enemy Variety Run"
+
 [node name="StatusPlaytest" type="CheckBox" parent="Layout/ConnectionMargin/Connection/Controls"]
 unique_name_in_owner = true
 layout_mode = 2
