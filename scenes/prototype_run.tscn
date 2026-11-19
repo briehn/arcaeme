@@ -34,17 +34,20 @@ theme_override_constants/separation = 12
 layout_mode = 2
 theme_override_font_sizes/font_size = 28
 text = "Battle Mage Prototype Run"
+autowrap_mode = 3
 
 [node name="Heading" type="Label" parent="RunPanel/Layout"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.98, 0.84, 0.56, 1)
 theme_override_font_sizes/font_size = 23
+autowrap_mode = 3
 
 [node name="RunStatus" type="Label" parent="RunPanel/Layout"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
+autowrap_mode = 3
 
 [node name="Separator" type="HSeparator" parent="RunPanel/Layout"]
 layout_mode = 2
@@ -65,9 +68,16 @@ unique_name_in_owner = true
 layout_mode = 2
 autowrap_mode = 3
 
-[node name="Choices" type="VBoxContainer" parent="RunPanel/Layout/Body/Selection"]
+[node name="ChoiceScroll" type="ScrollContainer" parent="RunPanel/Layout/Body/Selection"]
+layout_mode = 2
+size_flags_vertical = 3
+follow_focus = true
+horizontal_scroll_mode = 0
+
+[node name="Choices" type="VBoxContainer" parent="RunPanel/Layout/Body/Selection/ChoiceScroll"]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 10
 
 [node name="Deck" type="VBoxContainer" parent="RunPanel/Layout/Body"]
@@ -79,6 +89,7 @@ theme_override_constants/separation = 10
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
+autowrap_mode = 3
 
 [node name="DeckList" type="RichTextLabel" parent="RunPanel/Layout/Body/Deck"]
 unique_name_in_owner = true

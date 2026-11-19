@@ -36,27 +36,47 @@ theme_override_constants/margin_right = 30
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Controls" type="HBoxContainer" parent="Layout/ConnectionMargin/Connection"]
+[node name="Controls" type="HFlowContainer" parent="Layout/ConnectionMargin/Connection"]
+unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 8
 
-[node name="Address" type="Label" parent="Layout/ConnectionMargin/Connection/Controls"]
+[node name="AddressControls" type="HBoxContainer" parent="Layout/ConnectionMargin/Connection/Controls"]
+layout_mode = 2
+
+[node name="Address" type="Label" parent="Layout/ConnectionMargin/Connection/Controls/AddressControls"]
 layout_mode = 2
 text = "127.0.0.1 · UDP port"
 
-[node name="Port" type="SpinBox" parent="Layout/ConnectionMargin/Connection/Controls"]
+[node name="Port" type="SpinBox" parent="Layout/ConnectionMargin/Connection/Controls/AddressControls"]
 unique_name_in_owner = true
 layout_mode = 2
 min_value = 1024.0
 max_value = 65535.0
 
-[node name="PartySizeLabel" type="Label" parent="Layout/ConnectionMargin/Connection/Controls"]
+[node name="PartySizeControls" type="HBoxContainer" parent="Layout/ConnectionMargin/Connection/Controls"]
+layout_mode = 2
+
+[node name="PartySizeLabel" type="Label" parent="Layout/ConnectionMargin/Connection/Controls/PartySizeControls"]
 layout_mode = 2
 text = "Host party size"
 
-[node name="PartySize" type="OptionButton" parent="Layout/ConnectionMargin/Connection/Controls"]
+[node name="PartySize" type="OptionButton" parent="Layout/ConnectionMargin/Connection/Controls/PartySizeControls"]
 unique_name_in_owner = true
 layout_mode = 2
+
+[node name="ShortRun" type="CheckBox" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Host an opening encounter, personal card rewards, and a boss."
+text = "Short Run (Prototype)"
+
+[node name="StatusPlaytest" type="CheckBox" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Use provisional status cards and attack effects in the standalone encounter."
+text = "Poison & Burning (Prototype)"
 
 [node name="HostButton" type="Button" parent="Layout/ConnectionMargin/Connection/Controls"]
 unique_name_in_owner = true
@@ -68,25 +88,80 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Join Encounter"
 
-[node name="Spacer" type="Control" parent="Layout/ConnectionMargin/Connection/Controls"]
+[node name="SessionInfo" type="HBoxContainer" parent="Layout/ConnectionMargin/Connection"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SessionText" type="VBoxContainer" parent="Layout/ConnectionMargin/Connection/SessionInfo"]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_constants/separation = 8
 
-[node name="LeaveButton" type="Button" parent="Layout/ConnectionMargin/Connection/Controls"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "Back to Menu"
-
-[node name="ConnectionStatus" type="Label" parent="Layout/ConnectionMargin/Connection"]
+[node name="ConnectionStatus" type="Label" parent="Layout/ConnectionMargin/Connection/SessionInfo/SessionText"]
 unique_name_in_owner = true
 layout_mode = 2
 autowrap_mode = 3
 
-[node name="PartyRoster" type="Label" parent="Layout/ConnectionMargin/Connection"]
+[node name="PartyRoster" type="Label" parent="Layout/ConnectionMargin/Connection/SessionInfo/SessionText"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 autowrap_mode = 3
+
+[node name="LeaveButton" type="Button" parent="Layout/ConnectionMargin/Connection/SessionInfo"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 0
+text = "Back to Menu"
+
+[node name="RunStage" type="Label" parent="Layout/ConnectionMargin/Connection"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+autowrap_mode = 3
+
+[node name="RewardPanel" type="MarginContainer" parent="Layout"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/margin_left = 30
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 30
+theme_override_constants/margin_bottom = 20
+
+[node name="RewardLayout" type="VBoxContainer" parent="Layout/RewardPanel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="RewardStatus" type="Label" parent="Layout/RewardPanel/RewardLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="RewardProgress" type="Label" parent="Layout/RewardPanel/RewardLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="RewardScroll" type="ScrollContainer" parent="Layout/RewardPanel/RewardLayout"]
+layout_mode = 2
+size_flags_vertical = 3
+follow_focus = true
+horizontal_scroll_mode = 0
+
+[node name="RewardChoices" type="VBoxContainer" parent="Layout/RewardPanel/RewardLayout/RewardScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="SkipReward" type="Button" parent="Layout/RewardPanel/RewardLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 0
+text = "Skip Reward"
 
 [node name="CombatSlot" type="Control" parent="Layout"]
 unique_name_in_owner = true
@@ -96,4 +171,5 @@ size_flags_vertical = 3
 
 [connection signal="pressed" from="Layout/ConnectionMargin/Connection/Controls/HostButton" to="." method="_on_host_pressed"]
 [connection signal="pressed" from="Layout/ConnectionMargin/Connection/Controls/JoinButton" to="." method="_on_join_pressed"]
-[connection signal="pressed" from="Layout/ConnectionMargin/Connection/Controls/LeaveButton" to="." method="_on_leave_pressed"]
+[connection signal="pressed" from="Layout/ConnectionMargin/Connection/SessionInfo/LeaveButton" to="." method="_on_leave_pressed"]
+[connection signal="pressed" from="Layout/RewardPanel/RewardLayout/SkipReward" to="." method="_on_skip_reward_pressed"]

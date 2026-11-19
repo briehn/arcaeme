@@ -10,3 +10,6 @@ const CardData = preload("res://scripts/combat/card_data.gd")
 @export var enemy_attack: int
 @export var shuffle_seed: int
 @export var test_deck: Array[CardData] = []
+## Provisional attack payloads applied to living targets after direct damage.
+@export var enemy_poison_per_attack: int
+@export var enemy_burning_per_attack: int

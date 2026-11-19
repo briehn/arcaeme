@@ -3,6 +3,7 @@ extends Control
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const ViewSnapshot = preload("res://scripts/combat/combat_view_snapshot.gd")
+const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
 const PLAYER_ID := &"Battle Mage"
 
 signal encounter_finished(combat: CombatState)
@@ -16,7 +17,7 @@ signal network_end_turn_requested
 @onready var player_label: Label = %PlayerLabel
 @onready var enemy_label: Label = %EnemyLabel
 @onready var cards_label: Label = %CardsLabel
-@onready var player_selector: HBoxContainer = %PlayerSelector
+@onready var player_selector: HFlowContainer = %PlayerSelector
 @onready var hand_cards: HFlowContainer = %HandCards
 @onready var combat_log: RichTextLabel = %CombatLog
 @onready var end_turn_button: Button = %EndTurnButton
@@ -27,6 +28,7 @@ var _card_buttons: Dictionary[int, Button] = {}
 var _shown_log_lines := 0
 var _run_title: String
 var _network_mode := false
+var _displayed_encounter := -1
 
 
 func configure_run(combat: CombatState, run_encounter: EncounterData, title: String) -> void:
@@ -40,12 +42,18 @@ func configure_network() -> void:
 
 
 func display_network_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
+	var encounter_id: int = snapshot.get("encounter_id", 0)
+	if encounter_id != _displayed_encounter:
+		clear_network_view()
+		_displayed_encounter = encounter_id
+	%TitleLabel.visible = not snapshot.has("run_stage")
 	_render_snapshot(snapshot, input_allowed)
 
 
 func clear_network_view() -> void:
 	combat_log.clear()
 	_shown_log_lines = 0
+	_displayed_encounter = -1
 	_render_hand([], false)
 
 
@@ -88,9 +96,14 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 	player_label.text = "\n".join(stats)
 	enemy_label.text = "%s   ·   HP %d/%d" % [
 		snapshot["enemy_name"], snapshot["enemy_hp"], snapshot["enemy_max_hp"]]
+	enemy_label.text += _status_counters(snapshot.get("enemy_poison", 0), snapshot.get("enemy_burning", 0))
 	if in_combat:
 		var intent := "Attack all living players for %d damage each" if coop else "Attack for %d damage"
 		enemy_label.text += "   ·   Intent: " + (intent % snapshot["enemy_attack"])
+		var poison_per_attack: int = snapshot.get("enemy_poison_per_attack", 0)
+		var burning_per_attack: int = snapshot.get("enemy_burning_per_attack", 0)
+		if poison_per_attack > 0 or burning_per_attack > 0:
+			enemy_label.text += "\nOn surviving targets" + _status_counters(poison_per_attack, burning_per_attack)
 	var hand: Array = snapshot["hand"]
 	cards_label.text = "Hand %d   ·   Draw pile %d   ·   Discard pile %d" % [
 		hand.size(), snapshot["draw_count"], snapshot["discard_count"]]
@@ -126,7 +139,16 @@ func _player_stats(player: Dictionary, show_turn_status: bool, phase: int) -> St
 		elif player.ended_turn:
 			status = "Turn ended"
 		stats += "   ·   " + status
-	return stats
+	return stats + _status_counters(player.get("poison", 0), player.get("burning", 0))
+
+
+func _status_counters(poison: int, burning: int) -> String:
+	var counters := ""
+	if poison > 0:
+		counters += "   ·   Poison %d" % poison
+	if burning > 0:
+		counters += "   ·   Burning %d" % burning
+	return counters
 
 
 func _setup_player_selector() -> void:
@@ -165,7 +187,7 @@ func _render_hand(hand: Array, input_allowed: bool) -> void:
 		var copy_id: int = card.copy
 		var button: Button = _card_buttons.get(copy_id)
 		if button == null:
-			button = Button.new()
+			button = WrappedTextButton.new()
 			button.custom_minimum_size = Vector2(195, 112)
 			button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			button.text = "%s\n%d Mana\n\n%s" % [card.name, card.cost, card.description]

@@ -1,6 +1,6 @@
 extends Resource
 
-enum Kind { DAMAGE, GAIN_BLOCK, DRAW, PREPARE_ATTACK }
+enum Kind { DAMAGE, GAIN_BLOCK, DRAW, PREPARE_ATTACK, APPLY_POISON, APPLY_BURNING }
 
 @export var kind: Kind
 @export var amount: int
@@ -9,6 +9,10 @@ enum Kind { DAMAGE, GAIN_BLOCK, DRAW, PREPARE_ATTACK }
 ## A positive cost enables automatic spending for the conditional bonus damage.
 @export var block_to_spend: int
 @export var damage_on_block_spend: int
+
+
+func targets_enemy() -> bool:
+	return kind in [Kind.DAMAGE, Kind.APPLY_POISON, Kind.APPLY_BURNING]
 
 
 func describe() -> String:
@@ -27,4 +31,8 @@ func describe() -> String:
 			return "Draw %d %s." % [amount, "card" if amount == 1 else "cards"]
 		Kind.PREPARE_ATTACK:
 			return "Your next Attack this turn deals %d additional damage." % amount
+		Kind.APPLY_POISON:
+			return "Apply %d Poison." % amount
+		Kind.APPLY_BURNING:
+			return "Apply %d Burning." % amount
 	return ""

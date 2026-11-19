@@ -16,9 +16,12 @@ class PlayerState:
 	var max_hp: int
 	var mana: int
 	var block: int
+	var poison: int
+	var burning: int
 	var next_attack_bonus: int
 	var ended_turn: bool
 	var recovered_after_victory: bool
+	var first_copy_id: int
 	var hand: Array[int] = []
 	var draw_pile: Array[int] = []
 	var discard_pile: Array[int] = []
@@ -28,6 +31,8 @@ var phase: Phase = Phase.PLAYER
 var round_number: int
 var shuffle_seed: int
 var enemy_hp: int
+var enemy_poison: int
+var enemy_burning: int
 var players: Dictionary[StringName, PlayerState] = {}
 var action_history: Array[Dictionary] = []
 var combat_log: PackedStringArray = []
@@ -37,7 +42,8 @@ var _cards: Array[CardData] = []
 var _rng := RandomNumberGenerator.new()
 
 
-func _init(encounter: EncounterData, encounter_seed: int, player_ids: Array[StringName], starting_hp := -1) -> void:
+func _init(encounter: EncounterData, encounter_seed: int, player_ids: Array[StringName], starting_hp := -1,
+		player_decks: Dictionary[StringName, Array] = {}, player_hps: Dictionary[StringName, int] = {}) -> void:
 	assert(not player_ids.is_empty(), "Combat requires at least one player.")
 	_encounter = encounter
 	shuffle_seed = encounter_seed
@@ -49,8 +55,9 @@ func _init(encounter: EncounterData, encounter_seed: int, player_ids: Array[Stri
 		var player := PlayerState.new()
 		player.id = player_id
 		player.max_hp = _encounter.player_max_hp
-		player.hp = player.max_hp if starting_hp < 0 else starting_hp
-		for card in _encounter.test_deck:
+		player.hp = player_hps.get(player_id, player.max_hp if starting_hp < 0 else starting_hp)
+		player.first_copy_id = _cards.size()
+		for card in player_decks.get(player_id, _encounter.test_deck):
 			player.draw_pile.append(_cards.size())
 			_cards.append(card)
 		_shuffle(player.draw_pile)
@@ -95,6 +102,8 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 				player.next_attack_bonus += effect.amount
 				_log("%s prepared their next Attack for +%d damage this turn." % [
 					player.id, player.next_attack_bonus])
+			CardEffect.Kind.APPLY_POISON, CardEffect.Kind.APPLY_BURNING:
+				_apply_card_status(effect)
 	player.discard_pile.append(copy_id)
 	if enemy_hp == 0:
 		_resolve_victory()
@@ -120,6 +129,13 @@ func end_turn(player_id: StringName) -> bool:
 		player.discard_pile.append_array(player.hand)
 		player.hand.clear()
 	_log("%s ended their turn." % player.id)
+	if player.burning > 0:
+		player.hp = _take_status_damage(player.hp, player.burning, "Burning", player.id)
+		player.burning = _remaining_burning(player.burning)
+		if player.hp == 0:
+			_log("%s was defeated." % player.id)
+			if _finish_if_party_down():
+				return true
 	for other: PlayerState in players.values():
 		if other.hp > 0 and not other.ended_turn:
 			return true
@@ -153,6 +169,29 @@ func _deal_card_damage(player: PlayerState, card: CardData, effect: CardEffect) 
 	_log("%s took %d damage." % [_encounter.enemy_name, hp_lost])
 
 
+func _apply_card_status(effect: CardEffect) -> void:
+	if enemy_hp == 0 or effect.amount <= 0:
+		return
+	if effect.kind == CardEffect.Kind.APPLY_POISON:
+		enemy_poison += effect.amount
+		_log_status_application(_encounter.enemy_name, effect.amount, "Poison")
+	else:
+		# Provisional: repeated Burning applications add their stacks.
+		enemy_burning += effect.amount
+		_log_status_application(_encounter.enemy_name, effect.amount, "Burning")
+
+
+func _take_status_damage(hp: int, stacks: int, status_name: String, target: String) -> int:
+	var hp_lost := mini(hp, stacks)
+	_log("%s lost %d HP to %s." % [target, hp_lost, status_name])
+	return hp - hp_lost
+
+
+func _remaining_burning(stacks: int) -> int:
+	@warning_ignore("integer_division")
+	return stacks - stacks / 2
+
+
 func _can_act(player: PlayerState) -> bool:
 	return phase == Phase.PLAYER and player != null and player.hp > 0 and not player.ended_turn
 
@@ -167,15 +206,27 @@ func _begin_player_phase() -> void:
 		if player.block > 0:
 			_log("%s lost %d remaining Block at turn start." % [player.id, player.block])
 		player.block = 0
+		if player.poison > 0:
+			player.hp = _take_status_damage(player.hp, player.poison, "Poison", player.id)
+			player.poison -= 1
+			if player.hp == 0:
+				_log("%s was defeated." % player.id)
+				continue
 		player.mana = TURN_MANA
 		player.ended_turn = false
 		_draw(player, TURN_DRAW)
+	_finish_if_party_down()
 
 
 func _resolve_enemy_phase() -> void:
 	phase = Phase.ENEMY
+	if enemy_poison > 0:
+		enemy_hp = _take_status_damage(enemy_hp, enemy_poison, "Poison", _encounter.enemy_name)
+		enemy_poison -= 1
+		if enemy_hp == 0:
+			_resolve_victory()
+			return
 	_log("%s attacks for %d damage." % [_encounter.enemy_name, _encounter.enemy_attack])
-	var any_survived := false
 	for player: PlayerState in players.values():
 		if player.hp <= 0:
 			continue
@@ -184,15 +235,42 @@ func _resolve_enemy_phase() -> void:
 		player.block -= absorbed
 		player.hp -= hp_lost
 		_log("%s blocked %d and lost %d HP." % [player.id, absorbed, hp_lost])
-		if player.hp > 0:
-			any_survived = true
-		else:
+		if player.hp == 0:
 			_log("%s was defeated." % player.id)
-	if any_survived:
-		_begin_player_phase()
-	else:
-		phase = Phase.DEFEAT
-		_log("Defeat.")
+			continue
+		_apply_attack_statuses(player)
+	# Provisional: a lethal enemy attack ends the encounter before its end-turn status tick.
+	if _finish_if_party_down():
+		return
+	if enemy_burning > 0:
+		enemy_hp = _take_status_damage(enemy_hp, enemy_burning, "Burning", _encounter.enemy_name)
+		enemy_burning = _remaining_burning(enemy_burning)
+		if enemy_hp == 0:
+			_resolve_victory()
+			return
+	_begin_player_phase()
+
+
+func _apply_attack_statuses(player: PlayerState) -> void:
+	if _encounter.enemy_poison_per_attack > 0:
+		player.poison += _encounter.enemy_poison_per_attack
+		_log_status_application(player.id, _encounter.enemy_poison_per_attack, "Poison")
+	if _encounter.enemy_burning_per_attack > 0:
+		player.burning += _encounter.enemy_burning_per_attack
+		_log_status_application(player.id, _encounter.enemy_burning_per_attack, "Burning")
+
+
+func _log_status_application(target: String, amount: int, status_name: String) -> void:
+	_log("%s gained %d %s stacks." % [target, amount, status_name])
+
+
+func _finish_if_party_down() -> bool:
+	for player: PlayerState in players.values():
+		if player.hp > 0:
+			return false
+	phase = Phase.DEFEAT
+	_log("Defeat.")
+	return true
 
 
 func _resolve_victory() -> void:

@@ -17,6 +17,7 @@
 *.ppt
 *.pptx
 *.odp
+*.toml
 
 # Explicitly requested names (including lowercase variants)
 [Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]

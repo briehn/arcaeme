@@ -5,6 +5,7 @@ const CombatState = preload("res://scripts/combat/combat_state.gd")
 const CombatView = preload("res://scripts/combat.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const RunState = preload("res://scripts/run/run_state.gd")
+const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 
 @export var run_data: RunData
@@ -78,7 +79,7 @@ func _render_deck(deck: Array[CardData]) -> void:
 
 
 func _add_choice(label: String, action: Callable) -> void:
-	var button := Button.new()
+	var button := WrappedTextButton.new()
 	button.text = label
 	button.custom_minimum_size.y = 56
 	button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

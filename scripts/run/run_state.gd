@@ -8,7 +8,7 @@ const RunData = preload("res://scripts/run/run_data.gd")
 enum Stage { ROUTE, OPENING_COMBAT, REWARD, BOSS_READY, BOSS_COMBAT, VICTORY, DEFEAT }
 
 const PLAYER_ID := &"Battle Mage"
-const PLAYER_CLASS := &"battle_mage"
+const PLAYER_CLASS := RunData.BATTLE_MAGE
 
 var stage := Stage.ROUTE
 var run_seed: int
@@ -31,11 +31,7 @@ func _init(data: RunData) -> void:
 	max_hp = data.player_max_hp
 	current_hp = max_hp
 	_deck = data.starting_deck.duplicate()
-	var seen_ids: Dictionary[StringName, bool] = {}
-	for card in data.reward_candidates:
-		if card != null and card.owner_class_id == PLAYER_CLASS and card.id != &"" and not seen_ids.has(card.id):
-			_eligible_rewards.append(card)
-			seen_ids[card.id] = true
+	_eligible_rewards = data.eligible_rewards(PLAYER_CLASS)
 
 
 func deck_cards() -> Array[CardData]:

@@ -2,6 +2,8 @@ extends Node
 
 const Authority = preload("res://scripts/network/network_combat_authority.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
+const RunData = preload("res://scripts/run/run_data.gd")
+const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
 
 signal changed
 signal command_result(sequence: int, result: int)
@@ -16,6 +18,7 @@ const SERVER_ID := 1
 const JOIN_TIMEOUT_SECONDS := 5.0
 
 @export var encounter: EncounterData
+@export var run_data: RunData = preload("res://resources/prototype/battle_mage_run.tres")
 @export var player_ids: Array[StringName] = []
 
 var status := Status.IDLE
@@ -33,6 +36,7 @@ var _assignments: Dictionary[int, StringName] = {}
 var _join_timer: Timer
 var _next_sequence := 0
 var _pending_sequence := 0
+var _hosting_short_run := false
 
 
 func _ready() -> void:
@@ -52,8 +56,8 @@ func _exit_tree() -> void:
 	_close_transport()
 
 
-func host(port: int = DEFAULT_PORT, seats: int = MIN_PARTY_SIZE) -> Error:
-	return _open(port, true, seats)
+func host(port: int = DEFAULT_PORT, seats: int = MIN_PARTY_SIZE, short_run := false) -> Error:
+	return _open(port, true, seats, short_run)
 
 
 func join(port: int = DEFAULT_PORT) -> Error:
@@ -72,12 +76,19 @@ func submit_end_turn() -> bool:
 	return _submit(Authority.Command.END_TURN)
 
 
-func _open(port: int, as_host: bool, seats: int) -> Error:
+func submit_reward(card_id: String) -> bool:
+	if snapshot.get("run_stage") != CoopRunState.REWARD or snapshot.get("reward_submitted", true):
+		return false
+	return _submit(Authority.Command.REWARD, -1, card_id)
+
+
+func _open(port: int, as_host: bool, seats: int, short_run := false) -> Error:
 	if _transport != null:
 		return ERR_ALREADY_IN_USE
 	if port < 1024 or port > 65535:
 		return ERR_INVALID_PARAMETER
 	hosting = as_host
+	_hosting_short_run = hosting and short_run
 	party_size = 0
 	local_player = ""
 	connected_players.clear()
@@ -87,7 +98,7 @@ func _open(port: int, as_host: bool, seats: int) -> Error:
 	_next_sequence = 0
 	_pending_sequence = 0
 	if hosting and not _valid_host_setup(seats):
-		_disconnect("The host needs an encounter and distinct player IDs for the selected party size (2–4).")
+		_disconnect("Check the encounter, the short-run reward pool, and distinct player IDs for 2–4 seats.")
 		return ERR_INVALID_PARAMETER
 	var peer := ENetMultiplayerPeer.new()
 	var error: Error
@@ -118,7 +129,14 @@ func _open(port: int, as_host: bool, seats: int) -> Error:
 
 
 func _valid_host_setup(seats: int) -> bool:
-	if encounter == null or seats < MIN_PARTY_SIZE or seats > MAX_PARTY_SIZE or seats > player_ids.size():
+	if seats < MIN_PARTY_SIZE or seats > MAX_PARTY_SIZE or seats > player_ids.size():
+		return false
+	if not _hosting_short_run and encounter == null:
+		return false
+	if _hosting_short_run and (run_data == null or run_data.opening_encounters.is_empty()
+			or run_data.opening_encounters[0] == null or run_data.boss_encounter == null
+			or run_data.player_max_hp <= 0 or run_data.starting_deck.is_empty()
+			or run_data.eligible_rewards(RunData.BATTLE_MAGE).is_empty()):
 		return false
 	var selected := player_ids.slice(0, seats)
 	for player_id in selected:
@@ -137,7 +155,7 @@ func _on_peer_connected(peer_id: int) -> void:
 	_publish_roster()
 	if _assignments.size() == party_size:
 		_transport.refuse_new_connections = true
-		_authority = Authority.new(encounter, _assignments)
+		_authority = Authority.new(encounter, _assignments, run_data if _hosting_short_run else null)
 		_publish(0, 0)
 
 
@@ -213,21 +231,27 @@ func _close_transport() -> void:
 		peer.close()
 
 
-func _submit(kind: Authority.Command, copy_id: int = -1) -> bool:
+func _submit(kind: Authority.Command, copy_id: int = -1, reward_id := "") -> bool:
 	if not can_submit():
 		return false
 	_next_sequence += 1
 	_pending_sequence = _next_sequence
-	var request := {"actor": snapshot["viewer"], "round": snapshot["round"], "phase": snapshot["phase"],
-		"sequence": _pending_sequence, "kind": int(kind)}
-	if kind == Authority.Command.PLAY_CARD:
-		request["copy"] = copy_id
+	var request := {"actor": snapshot["viewer"], "sequence": _pending_sequence, "kind": int(kind)}
+	if snapshot.has("encounter_id"):
+		request["encounter_id"] = snapshot["encounter_id"]
+	if kind == Authority.Command.REWARD:
+		request["reward_id"] = reward_id
+	else:
+		request["round"] = snapshot["round"]
+		request["phase"] = snapshot["phase"]
+		if kind == Authority.Command.PLAY_CARD:
+			request["copy"] = copy_id
 	if hosting:
 		_handle_command(SERVER_ID, request)
 	else:
 		var error := rpc_id(SERVER_ID, &"_request_command", request)
 		if error != OK:
-			_disconnect("Could not send the action to the host. The encounter has ended.")
+			_disconnect("Could not send the action to the host. The session has ended.")
 			return false
 		message = _connected_message()
 		changed.emit()
@@ -277,8 +301,12 @@ func _from_host() -> bool:
 
 
 func _apply_snapshot(view: Dictionary, sequence: int, result: int) -> void:
-	if not snapshot.is_empty() and view["revision"] < snapshot["revision"]:
-		return
+	# Encounter-local combat revisions restart at the boss. Run revisions include reward submissions.
+	if not snapshot.is_empty():
+		var incoming_revision: int = view.get("run_revision", view["revision"])
+		var current_revision: int = snapshot.get("run_revision", snapshot["revision"])
+		if view.get("encounter_id", 0) < snapshot.get("encounter_id", 0) or incoming_revision < current_revision:
+			return
 	snapshot = view
 	_join_timer.stop()
 	status = Status.ACTIVE

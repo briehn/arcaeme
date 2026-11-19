@@ -21,6 +21,6 @@ func description() -> String:
 
 func targets_enemy() -> bool:
 	for effect in effects:
-		if effect.kind == CardEffect.Kind.DAMAGE:
+		if effect.targets_enemy():
 			return true
 	return false
