@@ -1,0 +1,95 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/prototype_run.gd" id="1_run"]
+[ext_resource type="Resource" path="res://resources/prototype/battle_mage_run.tres" id="2_run_data"]
+
+[node name="PrototypeRun" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_run")
+run_data = ExtResource("2_run_data")
+
+[node name="RunPanel" type="MarginContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 30
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 30
+theme_override_constants/margin_bottom = 20
+
+[node name="Layout" type="VBoxContainer" parent="RunPanel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="RunPanel/Layout"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "Battle Mage Prototype Run"
+
+[node name="Heading" type="Label" parent="RunPanel/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.84, 0.56, 1)
+theme_override_font_sizes/font_size = 23
+
+[node name="RunStatus" type="Label" parent="RunPanel/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+
+[node name="Separator" type="HSeparator" parent="RunPanel/Layout"]
+layout_mode = 2
+
+[node name="Body" type="HBoxContainer" parent="RunPanel/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 28
+
+[node name="Selection" type="VBoxContainer" parent="RunPanel/Layout/Body"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 2.0
+theme_override_constants/separation = 10
+
+[node name="Message" type="Label" parent="RunPanel/Layout/Body/Selection"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="Choices" type="VBoxContainer" parent="RunPanel/Layout/Body/Selection"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Deck" type="VBoxContainer" parent="RunPanel/Layout/Body"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="DeckTitle" type="Label" parent="RunPanel/Layout/Body/Deck"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+
+[node name="DeckList" type="RichTextLabel" parent="RunPanel/Layout/Body/Deck"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="RunBackButton" type="Button" parent="RunPanel/Layout"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(138, 40)
+layout_mode = 2
+size_flags_horizontal = 0
+text = "Back to Menu"
+
+[connection signal="pressed" from="RunPanel/Layout/RunBackButton" to="." method="_on_back_pressed"]

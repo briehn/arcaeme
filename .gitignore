@@ -1,0 +1,23 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Documents
+*.md
+*.markdown
+*.txt
+*.rtf
+*.doc
+*.docx
+*.odt
+*.pdf
+*.xls
+*.xlsx
+*.ods
+*.ppt
+*.pptx
+*.odp
+
+# Explicitly requested names (including lowercase variants)
+[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
+read.me

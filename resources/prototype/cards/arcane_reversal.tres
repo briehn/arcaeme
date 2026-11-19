@@ -1,0 +1,20 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="1_card"]
+[ext_resource type="Script" path="res://scripts/combat/card_effect.gd" id="2_effect"]
+
+[sub_resource type="Resource" id="Damage"]
+script = ExtResource("2_effect")
+kind = 0
+amount = 8
+block_to_spend = 6
+damage_on_block_spend = 6
+
+[resource]
+script = ExtResource("1_card")
+id = &"arcane_reversal"
+display_name = "Arcane Reversal"
+mana_cost = 1
+is_attack = true
+owner_class_id = &"battle_mage"
+effects = Array[ExtResource("2_effect")]([SubResource("Damage")])

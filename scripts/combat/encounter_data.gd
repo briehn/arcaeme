@@ -1,0 +1,12 @@
+extends Resource
+
+const CardData = preload("res://scripts/combat/card_data.gd")
+
+@export_group("Provisional Playtest Fixture")
+@export var player_max_hp: int
+@export var enemy_id: StringName
+@export var enemy_name: String
+@export var enemy_max_hp: int
+@export var enemy_attack: int
+@export var shuffle_seed: int
+@export var test_deck: Array[CardData] = []

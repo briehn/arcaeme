@@ -1,0 +1,22 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="1_card"]
+[ext_resource type="Script" path="res://scripts/combat/card_effect.gd" id="2_effect"]
+
+[sub_resource type="Resource" id="Block"]
+script = ExtResource("2_effect")
+kind = 1
+amount = 7
+
+[sub_resource type="Resource" id="Preparation"]
+script = ExtResource("2_effect")
+kind = 3
+amount = 3
+
+[resource]
+script = ExtResource("1_card")
+id = &"battle_preparation"
+display_name = "Battle Preparation"
+mana_cost = 1
+owner_class_id = &"battle_mage"
+effects = Array[ExtResource("2_effect")]([SubResource("Block"), SubResource("Preparation")])

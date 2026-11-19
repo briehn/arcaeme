@@ -1,0 +1,52 @@
+[gd_scene format=3 uid="uid://bs50xfankguih"]
+
+[ext_resource type="Script" uid="uid://bemys4nptuxkq" path="res://scripts/main.gd" id="1_o5qli"]
+
+[node name="Main" type="Control" unique_id=1487196654]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_o5qli")
+
+[node name="CenterContainer" type="CenterContainer" parent="." unique_id=1426238377]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer" unique_id=1022854910]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="CenterContainer/VBoxContainer" unique_id=149349679]
+layout_mode = 2
+text = "Arcaeme"
+horizontal_alignment = 1
+
+[node name="Button" type="Button" parent="CenterContainer/VBoxContainer" unique_id=105371222]
+layout_mode = 2
+text = "Start Combat"
+
+[node name="StartRunButton" type="Button" parent="CenterContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Start Prototype Run"
+
+[node name="StartLocalCoopButton" type="Button" parent="CenterContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Start Local Co-op Test"
+
+[node name="StartNetworkCoopButton" type="Button" parent="CenterContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Start Network Co-op Test"
+
+[connection signal="pressed" from="CenterContainer/VBoxContainer/Button" to="." method="_on_button_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/StartRunButton" to="." method="_on_start_run_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/StartLocalCoopButton" to="." method="_on_start_local_coop_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/StartNetworkCoopButton" to="." method="_on_start_network_coop_pressed"]

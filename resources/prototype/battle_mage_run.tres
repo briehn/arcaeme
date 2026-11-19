@@ -1,0 +1,53 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/run/run_data.gd" id="1_run"]
+[ext_resource type="Script" path="res://scripts/combat/encounter_data.gd" id="2_encounter"]
+[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="3_card"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/basic_strike.tres" id="4_strike"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/basic_block.tres" id="5_block"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_guard.tres" id="6_guard"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/battle_preparation.tres" id="7_prep"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/shieldstrike.tres" id="8_shieldstrike"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_reversal.tres" id="9_reversal"]
+
+[sub_resource type="Resource" id="GateSentinel"]
+script = ExtResource("2_encounter")
+enemy_id = &"gate_sentinel"
+enemy_name = "Gate Sentinel"
+enemy_max_hp = 24
+enemy_attack = 7
+
+[sub_resource type="Resource" id="RiftStalker"]
+script = ExtResource("2_encounter")
+enemy_id = &"rift_stalker"
+enemy_name = "Rift Stalker"
+enemy_max_hp = 18
+enemy_attack = 10
+
+[sub_resource type="Resource" id="CitadelWarden"]
+script = ExtResource("2_encounter")
+enemy_id = &"citadel_warden"
+enemy_name = "Citadel Warden"
+enemy_max_hp = 38
+enemy_attack = 10
+
+[resource]
+script = ExtResource("1_run")
+run_seed = 104775
+player_max_hp = 36
+starting_deck = Array[ExtResource("3_card")]([
+	ExtResource("4_strike"),
+	ExtResource("4_strike"),
+	ExtResource("4_strike"),
+	ExtResource("4_strike"),
+	ExtResource("4_strike"),
+	ExtResource("5_block"),
+	ExtResource("5_block"),
+	ExtResource("5_block"),
+	ExtResource("5_block"),
+	ExtResource("6_guard"),
+	ExtResource("7_prep")
+])
+opening_encounters = Array[ExtResource("2_encounter")]([SubResource("GateSentinel"), SubResource("RiftStalker")])
+boss_encounter = SubResource("CitadelWarden")
+reward_candidates = Array[ExtResource("3_card")]([ExtResource("8_shieldstrike"), ExtResource("9_reversal"), ExtResource("6_guard")])

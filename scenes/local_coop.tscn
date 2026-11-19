@@ -1,0 +1,8 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/combat.tscn" id="1_combat"]
+[ext_resource type="Resource" path="res://resources/prototype/local_coop_encounter.tres" id="2_encounter"]
+
+[node name="LocalCoop" instance=ExtResource("1_combat")]
+encounter = ExtResource("2_encounter")
+player_ids = Array[StringName]([&"Battle Mage 1", &"Battle Mage 2"])

@@ -1,0 +1,85 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/network_coop.gd" id="1_view"]
+[ext_resource type="Script" path="res://scripts/network/network_coop_session.gd" id="2_session"]
+[ext_resource type="Resource" path="res://resources/prototype/local_coop_encounter.tres" id="3_encounter"]
+
+[node name="NetworkCoop" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_view")
+
+[node name="Session" type="Node" parent="."]
+script = ExtResource("2_session")
+encounter = ExtResource("3_encounter")
+player_ids = Array[StringName]([&"Battle Mage 1", &"Battle Mage 2"])
+
+[node name="Layout" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ConnectionMargin" type="MarginContainer" parent="Layout"]
+layout_mode = 2
+theme_override_constants/margin_left = 30
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 30
+
+[node name="Connection" type="VBoxContainer" parent="Layout/ConnectionMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Controls" type="HBoxContainer" parent="Layout/ConnectionMargin/Connection"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Address" type="Label" parent="Layout/ConnectionMargin/Connection/Controls"]
+layout_mode = 2
+text = "127.0.0.1 · UDP port"
+
+[node name="Port" type="SpinBox" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 1024.0
+max_value = 65535.0
+
+[node name="HostButton" type="Button" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Host Encounter"
+
+[node name="JoinButton" type="Button" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Join Encounter"
+
+[node name="Spacer" type="Control" parent="Layout/ConnectionMargin/Connection/Controls"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="LeaveButton" type="Button" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Back to Menu"
+
+[node name="ConnectionStatus" type="Label" parent="Layout/ConnectionMargin/Connection"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="CombatSlot" type="Control" parent="Layout"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+
+[connection signal="pressed" from="Layout/ConnectionMargin/Connection/Controls/HostButton" to="." method="_on_host_pressed"]
+[connection signal="pressed" from="Layout/ConnectionMargin/Connection/Controls/JoinButton" to="." method="_on_join_pressed"]
+[connection signal="pressed" from="Layout/ConnectionMargin/Connection/Controls/LeaveButton" to="." method="_on_leave_pressed"]
