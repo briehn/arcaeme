@@ -37,6 +37,12 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Start Prototype Run"
 
+[node name="CardExpansion" type="CheckBox" parent="CenterContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Use the expanded test deck in Enemy Prototype, Local Co-op, or Enemy Variety Run."
+text = "Card Expansion Deck (Prototype)"
+
 [node name="StartEnemyVarietyRunButton" type="Button" parent="CenterContainer/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2

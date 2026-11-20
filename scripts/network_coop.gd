@@ -4,6 +4,7 @@ const CombatView = preload("res://scripts/combat.gd")
 const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
 const NetworkSession = preload("res://scripts/network/network_coop_session.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
+const CardExpansionPlaytest = preload("res://scripts/run/card_expansion_playtest.gd")
 const EnemyPlaytestSelector = preload("res://scripts/ui/enemy_playtest_selector.gd")
 const PacingExperiment = preload("res://scripts/run/pacing_experiment.gd")
 const PacingVariantPicker = preload("res://scripts/ui/pacing_variant_picker.gd")
@@ -23,6 +24,7 @@ const ENEMY_VARIETY_RUN = preload("res://resources/prototype/enemy_variety_run.t
 @onready var status_playtest_field: CheckBox = %StatusPlaytest
 @onready var modifier_playtest_field: CheckBox = %ModifierPlaytest
 @onready var enemy_playtest_field: EnemyPlaytestSelector = %EnemyPlaytest
+@onready var card_expansion_field: CheckBox = %CardExpansion
 @onready var default_encounter := session.encounter
 @onready var default_run_data := session.run_data
 @onready var status_label: Label = %ConnectionStatus
@@ -51,6 +53,7 @@ func _ready() -> void:
 	status_playtest_field.toggled.connect(_on_status_playtest_toggled)
 	modifier_playtest_field.toggled.connect(_on_modifier_playtest_toggled)
 	enemy_playtest_field.item_selected.connect(_on_enemy_playtest_selected)
+	card_expansion_field.toggled.connect(_on_card_expansion_toggled)
 	_combat = COMBAT_SCENE.instantiate()
 	_combat.configure_network()
 	_combat.network_card_requested.connect(session.submit_card)
@@ -75,6 +78,7 @@ func _refresh() -> void:
 	status_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
 	modifier_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
 	enemy_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
+	_refresh_card_expansion_option(connected_or_waiting)
 	roster_label.visible = session.party_size > 0
 	if roster_label.visible:
 		roster_label.text = "%d/%d connected" % [session.connected_players.size(), session.party_size]
@@ -167,7 +171,6 @@ func _on_short_run_toggled(enabled: bool) -> void:
 		status_playtest_field.set_pressed_no_signal(false)
 		modifier_playtest_field.set_pressed_no_signal(false)
 		enemy_playtest_field.select(0)
-		_select_encounter_fixture()
 	else:
 		enemy_variety_run_field.button_pressed = false
 	enemy_variety_run_field.visible = enabled
@@ -175,6 +178,7 @@ func _on_short_run_toggled(enabled: bool) -> void:
 	status_playtest_field.disabled = enabled
 	modifier_playtest_field.disabled = enabled
 	enemy_playtest_field.disabled = enabled
+	_select_encounter_fixture()
 	_refresh_host_button_text()
 
 
@@ -184,6 +188,7 @@ func _on_enemy_variety_run_toggled(enabled: bool) -> void:
 	pacing_variant_field.disabled = not enabled
 	if not enabled:
 		pacing_variant_field.select(pacing_variant_field.get_item_index(PacingExperiment.VariantKind.BASELINE))
+	_refresh_card_expansion_option()
 	_refresh_host_button_text()
 
 
@@ -217,7 +222,22 @@ func _on_enemy_playtest_selected(index: int) -> void:
 	_select_encounter_fixture()
 
 
+func _on_card_expansion_toggled(_enabled: bool) -> void:
+	if not short_run_field.button_pressed:
+		_select_encounter_fixture()
+
+
+func _refresh_card_expansion_option(locked := false) -> void:
+	var available := enemy_variety_run_field.button_pressed if short_run_field.button_pressed \
+		else not (status_playtest_field.button_pressed or modifier_playtest_field.button_pressed)
+	if not available:
+		card_expansion_field.set_pressed_no_signal(false)
+	card_expansion_field.visible = available
+	card_expansion_field.disabled = locked or not available
+
+
 func _select_encounter_fixture() -> void:
+	_refresh_card_expansion_option()
 	if status_playtest_field.button_pressed:
 		session.encounter = STATUS_ENCOUNTER
 	elif modifier_playtest_field.button_pressed:
@@ -225,6 +245,8 @@ func _select_encounter_fixture() -> void:
 	else:
 		var enemy_prototype := enemy_playtest_field.selected_encounter()
 		session.encounter = enemy_prototype if enemy_prototype != null else default_encounter
+		if card_expansion_field.button_pressed and not short_run_field.button_pressed:
+			session.encounter = CardExpansionPlaytest.with_expansion_deck(session.encounter)
 
 
 func _on_host_pressed() -> void:
@@ -233,6 +255,8 @@ func _on_host_pressed() -> void:
 		var variant := pacing_variant_field.selected_variant()
 		session.run_data = ENEMY_VARIETY_RUN if variant == PacingExperiment.VariantKind.BASELINE \
 			else PacingExperiment.make_run(ENEMY_VARIETY_RUN, variant, party_size)
+		if card_expansion_field.button_pressed:
+			session.run_data = CardExpansionPlaytest.with_expansion_run(session.run_data)
 	session.host(int(port_field.value), party_size, short_run_field.button_pressed)
 
 

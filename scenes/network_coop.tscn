@@ -115,6 +115,12 @@ tooltip_text = "Choose a provisional enemy for the standalone encounter."
 script = ExtResource("4_enemy_selector")
 include_default = true
 
+[node name="CardExpansion" type="CheckBox" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Use the expanded test deck for this standalone encounter or Enemy Variety Run."
+text = "Card Expansion Deck (Prototype)"
+
 [node name="HostButton" type="Button" parent="Layout/ConnectionMargin/Connection/Controls"]
 unique_name_in_owner = true
 layout_mode = 2

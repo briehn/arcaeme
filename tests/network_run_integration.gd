@@ -5,6 +5,7 @@ const CombatState = preload("res://scripts/combat/combat_state.gd")
 const NetworkSession = preload("res://scripts/network/network_coop_session.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const PacingExperiment = preload("res://scripts/run/pacing_experiment.gd")
+const CardExpansionPlaytest = preload("res://scripts/run/card_expansion_playtest.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const CardData = preload("res://scripts/combat/card_data.gd")
 const DATA = preload("res://resources/prototype/battle_mage_run.tres")
@@ -21,6 +22,7 @@ const NETWORK := "res://scenes/network_coop.tscn"
 var _session: NetworkSession
 var _scenario: String
 var _enemy_variety := false
+var _card_expansion := false
 var _variety_data: RunData = VARIETY
 var _pacing := PacingExperiment.VariantKind.BASELINE
 var _size: int
@@ -65,6 +67,7 @@ func _start() -> void:
 		return
 	_scenario = args[0]
 	_enemy_variety = _scenario.begins_with("enemy-variety-")
+	_card_expansion = _scenario.begins_with("enemy-variety-expansion-")
 	_size = int(args[2])
 	match _scenario:
 		"enemy-variety-timing":
@@ -75,6 +78,8 @@ func _start() -> void:
 			_pacing = PacingExperiment.VariantKind.COMBINED
 	if _enemy_variety:
 		_variety_data = PacingExperiment.make_run(VARIETY, _pacing, _size)
+		if _card_expansion:
+			_variety_data = CardExpansionPlaytest.with_expansion_run(_variety_data)
 	_seat = int(args[3])
 	_actor = "Battle Mage %d" % _seat
 	_barrier = args[4]
@@ -120,6 +125,12 @@ func _start() -> void:
 				_fail("The pacing experiment is unavailable in the host lobby.")
 				return
 			pacing.select(option)
+			if _card_expansion:
+				var expansion: CheckBox = current_scene.get_node("%CardExpansion")
+				if expansion.disabled or expansion.button_pressed or not expansion.is_visible_in_tree():
+					_fail("The expansion deck should be visible and opt-in for the variety route.")
+					return
+				expansion.button_pressed = true
 	var launch: Button = current_scene.get_node("%HostButton" if _seat == 1 else "%JoinButton")
 	launch.pressed.emit()
 	while not _finished:
@@ -266,7 +277,7 @@ func _check_variety_view(view: Dictionary) -> bool:
 		return false
 	for card in view.hand:
 		var copy: int = card.copy
-		var expected_id := _chosen_reward if copy == _deck_size else String(VARIETY.starting_deck[copy].id)
+		var expected_id := _chosen_reward if copy == _deck_size else String(_variety_data.starting_deck[copy].id)
 		if card.id != expected_id:
 			_fail("The private hand diverged from this player's starting deck and chosen reward.")
 			return false
@@ -352,7 +363,7 @@ func _drive_combat(view: Dictionary) -> void:
 		# Let both enemy cycles reach their third advertised step. The host blocks to produce unequal carried HP.
 		if (_seat == 1 or view.run_stage == "boss") and view.players[_seat - 1].block < view.enemy_attack:
 			for card in view.hand:
-				if card.playable and card.id in ["basic_block", "arcane_guard", "battle_preparation"]:
+				if card.playable and card.id in ["basic_block", "arcane_guard", "battle_preparation", "prism_wall", "spellforge"]:
 					_play_card(card)
 					return
 	else:
@@ -580,6 +591,9 @@ func _report_outcome(view: Dictionary) -> void:
 		if view.round < 3 or (not _chosen_reward.is_empty() and not _drew_reward):
 			_fail("The party concluded before exercising the Treant cycle and drawing the chosen private reward.")
 			return
+		if _card_expansion and not _used_expansion_attack(view.log):
+			_fail("The host never accepted an expansion Attack in the final encounter.")
+			return
 		var carried_hp := PackedStringArray()
 		var final_hp := PackedStringArray()
 		for index in _size:
@@ -589,6 +603,13 @@ func _report_outcome(view: Dictionary) -> void:
 			title, view.round, "/".join(carried_hp), "/".join(final_hp), "\n".join(_variety_revisions).sha256_text()])
 	else:
 		_report("%s · encounter %d · round %d · %s" % [title, view.encounter_id, view.round, _public_digest(view)])
+
+
+func _used_expansion_attack(log_lines: PackedStringArray) -> bool:
+	for line in log_lines:
+		if " played Astral Salvo " in line or " played Rune Cut " in line or " played Warded Strike " in line:
+			return true
+	return false
 
 
 func _report_disconnect() -> void:
