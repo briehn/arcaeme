@@ -81,6 +81,14 @@ layout_mode = 2
 disabled = true
 text = "Enemy Variety Run"
 
+[node name="MultiEnemyRun" type="CheckBox" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+disabled = true
+tooltip_text = "Play Two Slimes, Goblin + Treant, and the Citadel Warden with personal rewards between fights."
+text = "Multi-Enemy Short Run"
+
 [node name="PacingControls" type="HBoxContainer" parent="Layout/ConnectionMargin/Connection/Controls"]
 unique_name_in_owner = true
 visible = false

@@ -48,6 +48,16 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Start Enemy Variety Run"
 
+[node name="StartMultiEnemyRunButton" type="Button" parent="CenterContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Start Multi-Enemy Short Run"
+
+[node name="StartLocalMultiEnemyRunButton" type="Button" parent="CenterContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Start Local Multi-Enemy Short Run"
+
 [node name="StartLocalCoopButton" type="Button" parent="CenterContainer/VBoxContainer" unique_id=1676790223]
 unique_name_in_owner = true
 layout_mode = 2
@@ -85,6 +95,8 @@ text = "Start Enemy Prototype"
 [connection signal="pressed" from="CenterContainer/VBoxContainer/Button" to="." method="_on_button_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartRunButton" to="." method="_on_start_run_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartEnemyVarietyRunButton" to="." method="_on_start_enemy_variety_run_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/StartMultiEnemyRunButton" to="." method="_start_multi_enemy_run" binds= [false]]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/StartLocalMultiEnemyRunButton" to="." method="_start_multi_enemy_run" binds= [true]]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartLocalCoopButton" to="." method="_on_start_local_coop_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartNetworkCoopButton" to="." method="_on_start_network_coop_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/StartStatusPlaytestButton" to="." method="_on_start_status_playtest_pressed"]

@@ -1,0 +1,25 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/run/run_data.gd" id="1_run"]
+[ext_resource type="Script" path="res://scripts/combat/encounter_data.gd" id="2_encounter"]
+[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="3_card"]
+[ext_resource type="Resource" path="res://resources/prototype/enemies/two_slimes.tres" id="slimes"]
+[ext_resource type="Resource" path="res://resources/prototype/enemies/goblin_treant.tres" id="goblin_treant"]
+[ext_resource type="Resource" path="res://resources/prototype/enemies/citadel_warden.tres" id="warden"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/basic_strike.tres" id="strike"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/basic_block.tres" id="block"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_guard.tres" id="guard"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/battle_preparation.tres" id="prep"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/shieldstrike.tres" id="shieldstrike"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_reversal.tres" id="reversal"]
+
+[resource]
+script = ExtResource("1_run")
+title = "Multi-Enemy Short Run (Prototype)"
+run_seed = 104775
+player_max_hp = 36
+starting_deck = Array[ExtResource("3_card")]([ExtResource("strike"), ExtResource("strike"), ExtResource("strike"), ExtResource("strike"), ExtResource("strike"), ExtResource("block"), ExtResource("block"), ExtResource("block"), ExtResource("block"), ExtResource("guard"), ExtResource("prep")])
+opening_encounters = Array[ExtResource("2_encounter")]([ExtResource("slimes")])
+intermediate_encounters = Array[ExtResource("2_encounter")]([ExtResource("goblin_treant")])
+boss_encounter = ExtResource("warden")
+reward_candidates = Array[ExtResource("3_card")]([ExtResource("shieldstrike"), ExtResource("reversal"), ExtResource("guard")])

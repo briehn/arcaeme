@@ -139,6 +139,7 @@ func _valid_host_setup(seats: int) -> bool:
 		return false
 	if _hosting_short_run and (run_data == null or run_data.opening_encounters.is_empty()
 			or run_data.opening_encounters[0] == null or run_data.boss_encounter == null
+			or run_data.intermediate_encounters.has(null)
 			or run_data.player_max_hp <= 0 or run_data.starting_deck.is_empty()
 			or run_data.eligible_rewards(RunData.BATTLE_MAGE).is_empty()):
 		return false

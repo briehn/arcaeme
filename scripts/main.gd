@@ -6,7 +6,9 @@ const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 const EnemyPlaytestSelector = preload("res://scripts/ui/enemy_playtest_selector.gd")
 const CardExpansionPlaytest = preload("res://scripts/run/card_expansion_playtest.gd")
 const PrototypeRunView = preload("res://scripts/prototype_run.gd")
+const PROTOTYPE_RUN_SCENE = preload("res://scenes/prototype_run.tscn")
 const ENEMY_VARIETY_RUN_SCENE = preload("res://scenes/enemy_variety_run.tscn")
+const MULTI_ENEMY_RUN = preload("res://resources/prototype/multi_enemy_run.tres")
 const LOCAL_COOP_SCENE = preload("res://scenes/local_coop.tscn")
 
 @onready var enemy_playtest: EnemyPlaytestSelector = %EnemyPlaytest
@@ -31,6 +33,13 @@ func _on_start_enemy_variety_run_pressed() -> void:
 	var run: PrototypeRunView = ENEMY_VARIETY_RUN_SCENE.instantiate()
 	if card_expansion.button_pressed:
 		run.run_data = CardExpansionPlaytest.with_expansion_run(run.run_data)
+	get_tree().change_scene_to_node(run)
+
+
+func _start_multi_enemy_run(local_coop: bool) -> void:
+	var run: PrototypeRunView = PROTOTYPE_RUN_SCENE.instantiate()
+	run.run_data = MULTI_ENEMY_RUN
+	run.local_coop = local_coop
 	get_tree().change_scene_to_node(run)
 
 

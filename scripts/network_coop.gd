@@ -12,6 +12,7 @@ const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 const STATUS_ENCOUNTER = preload("res://resources/prototype/status_playtest/encounter.tres")
 const MODIFIER_ENCOUNTER = preload("res://resources/prototype/modifier_playtest/encounter.tres")
 const ENEMY_VARIETY_RUN = preload("res://resources/prototype/enemy_variety_run.tres")
+const MULTI_ENEMY_RUN = preload("res://resources/prototype/multi_enemy_run.tres")
 
 @onready var session: NetworkSession = $Session
 @onready var setup_controls: HFlowContainer = %Controls
@@ -19,6 +20,7 @@ const ENEMY_VARIETY_RUN = preload("res://resources/prototype/enemy_variety_run.t
 @onready var party_size_field: OptionButton = %PartySize
 @onready var short_run_field: CheckBox = %ShortRun
 @onready var enemy_variety_run_field: CheckBox = %EnemyVarietyRun
+@onready var multi_enemy_run_field: CheckBox = %MultiEnemyRun
 @onready var pacing_controls: HBoxContainer = %PacingControls
 @onready var pacing_variant_field: PacingVariantPicker = %PacingVariant
 @onready var status_playtest_field: CheckBox = %StatusPlaytest
@@ -50,6 +52,7 @@ func _ready() -> void:
 	party_size_field.select(0)
 	short_run_field.toggled.connect(_on_short_run_toggled)
 	enemy_variety_run_field.toggled.connect(_on_enemy_variety_run_toggled)
+	multi_enemy_run_field.toggled.connect(_on_multi_enemy_run_toggled)
 	status_playtest_field.toggled.connect(_on_status_playtest_toggled)
 	modifier_playtest_field.toggled.connect(_on_modifier_playtest_toggled)
 	enemy_playtest_field.item_selected.connect(_on_enemy_playtest_selected)
@@ -75,6 +78,7 @@ func _refresh() -> void:
 	party_size_field.disabled = connected_or_waiting
 	short_run_field.disabled = connected_or_waiting
 	enemy_variety_run_field.disabled = connected_or_waiting or not short_run_field.button_pressed
+	multi_enemy_run_field.disabled = connected_or_waiting or not short_run_field.button_pressed
 	pacing_variant_field.disabled = connected_or_waiting or not enemy_variety_run_field.button_pressed
 	status_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
 	modifier_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
@@ -98,6 +102,8 @@ func _refresh_session_view() -> void:
 	match stage:
 		CoopRunState.OPENING:
 			stage_title = "Opening Encounter"
+		CoopRunState.INTERMEDIATE:
+			stage_title = "Encounter"
 		CoopRunState.REWARD:
 			stage_title = "Choose a Card Reward"
 		CoopRunState.BOSS:
@@ -108,6 +114,17 @@ func _refresh_session_view() -> void:
 			stage_title = "Run Defeat"
 	run_stage_label.visible = not stage_title.is_empty()
 	var run_title := "Network Short Run Prototype" if configured_title.is_empty() else configured_title
+	var encounter_count: int = session.snapshot.get("encounter_count", 0)
+	if encounter_count > 2:
+		var index: int = session.snapshot["encounter_id"]
+		var encounter_name: String = session.snapshot["enemy_name"]
+		if stage == CoopRunState.BOSS:
+			encounter_name = "Boss: " + encounter_name
+		var encounter_title := "Encounter %d of %d  ·  %s" % [index, encounter_count, encounter_name]
+		if stage in [CoopRunState.REWARD, CoopRunState.VICTORY, CoopRunState.DEFEAT]:
+			stage_title += "  /  " + encounter_title
+		else:
+			stage_title = encounter_title
 	run_stage_label.text = "%s  /  %s" % [run_title, stage_title]
 	if stage == CoopRunState.REWARD:
 		combat_slot.hide()
@@ -140,6 +157,10 @@ func _refresh_rewards() -> void:
 		reward_status.text = "Reward decision submitted. The %s begins when everyone is ready." % next_encounter
 	else:
 		reward_status.text = "Choose one provisional Battle Mage card for your run deck, or skip."
+	if connected and session.snapshot.get("encounter_count", 0) > 2:
+		reward_status.text = ("Reward decision submitted." if submitted
+			else "Choose one provisional Battle Mage card for your run deck, or skip.")
+		reward_status.text += " Next: %s, after everyone's decision." % session.snapshot["next_encounter_name"]
 	skip_reward_button.visible = choosing
 	if not choosing:
 		_clear_reward_choices()
@@ -173,28 +194,54 @@ func _on_short_run_toggled(enabled: bool) -> void:
 		modifier_playtest_field.set_pressed_no_signal(false)
 		enemy_playtest_field.select(0)
 	else:
-		enemy_variety_run_field.button_pressed = false
+		enemy_variety_run_field.set_pressed_no_signal(false)
+		multi_enemy_run_field.set_pressed_no_signal(false)
 	enemy_variety_run_field.visible = enabled
 	enemy_variety_run_field.disabled = not enabled
+	multi_enemy_run_field.visible = enabled
+	multi_enemy_run_field.disabled = not enabled
 	status_playtest_field.disabled = enabled
 	modifier_playtest_field.disabled = enabled
 	enemy_playtest_field.disabled = enabled
 	_select_encounter_fixture()
-	_refresh_host_button_text()
+	if enabled:
+		_refresh_host_button_text()
+	else:
+		_refresh_run_variant()
 
 
 func _on_enemy_variety_run_toggled(enabled: bool) -> void:
-	session.run_data = ENEMY_VARIETY_RUN if enabled else default_run_data
-	pacing_controls.visible = enabled
-	pacing_variant_field.disabled = not enabled
-	if not enabled:
+	if enabled:
+		multi_enemy_run_field.set_pressed_no_signal(false)
+	_refresh_run_variant()
+
+
+func _on_multi_enemy_run_toggled(enabled: bool) -> void:
+	if enabled:
+		enemy_variety_run_field.set_pressed_no_signal(false)
+	_refresh_run_variant()
+
+
+func _refresh_run_variant() -> void:
+	var variety := enemy_variety_run_field.button_pressed
+	if variety:
+		session.run_data = ENEMY_VARIETY_RUN
+	elif multi_enemy_run_field.button_pressed:
+		session.run_data = MULTI_ENEMY_RUN
+	else:
+		session.run_data = default_run_data
+	pacing_controls.visible = variety
+	pacing_variant_field.disabled = not variety
+	if not variety:
 		pacing_variant_field.select(pacing_variant_field.get_item_index(PacingExperiment.VariantKind.BASELINE))
 	_refresh_card_expansion_option()
 	_refresh_host_button_text()
 
 
 func _refresh_host_button_text() -> void:
-	if enemy_variety_run_field.button_pressed:
+	if multi_enemy_run_field.button_pressed:
+		host_button.text = "Host Multi-Enemy Short Run"
+	elif enemy_variety_run_field.button_pressed:
 		host_button.text = "Host Enemy Variety Run"
 	elif short_run_field.button_pressed:
 		host_button.text = "Host Short Run"

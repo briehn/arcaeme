@@ -1,6 +1,7 @@
 extends Control
 
 const CardData = preload("res://scripts/combat/card_data.gd")
+const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const CombatView = preload("res://scripts/combat.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
@@ -10,9 +11,11 @@ const RunData = preload("res://scripts/run/run_data.gd")
 const RunState = preload("res://scripts/run/run_state.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
+const LOCAL_MAGES: Array[StringName] = [&"Battle Mage 1", &"Battle Mage 2"]
 
 @export var run_data: RunData
 @export var enable_pacing_variants := false
+@export var local_coop := false
 
 @onready var run_panel: MarginContainer = %RunPanel
 @onready var heading: Label = %Heading
@@ -27,14 +30,21 @@ const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 @onready var _pacing_template := run_data
 
 var _run: RunState
+var _local_run: CoopRunState
 var _combat_view: CombatView
+var _local_reward_index := 0
+var _local_reward_revealed := false
 
 
 func _ready() -> void:
-	_run = RunState.new(run_data)
 	pacing_variant_field.item_selected.connect(_on_pacing_variant_selected)
 	if not run_data.title.is_empty():
 		$RunPanel/Layout/Title.text = run_data.title
+	if local_coop:
+		_local_run = CoopRunState.new(run_data, LOCAL_MAGES)
+		_show_local_combat()
+		return
+	_run = RunState.new(run_data)
 	_render_panel()
 
 
@@ -42,28 +52,45 @@ func _render_panel(focus_choice := true) -> void:
 	for choice in choices.get_children():
 		choices.remove_child(choice)
 		choice.queue_free()
+	if local_coop:
+		_render_local_panel()
+	else:
+		_render_solo_panel()
+	run_panel.show()
+	if focus_choice:
+		var focus_target: Button = choices.get_child(0) if choices.get_child_count() > 0 else back_button
+		focus_target.grab_focus()
+
+
+func _render_solo_panel() -> void:
 	pacing_controls.visible = enable_pacing_variants and _run.stage == RunState.Stage.ROUTE
 	message.text = ""
 	match _run.stage:
 		RunState.Stage.ROUTE:
 			heading.text = "Choose an opening encounter"
 			message.text = "Provisional encounter stats"
+			if _multi_enemy_route():
+				heading.text = "Choose to begin the fixed route"
 			for encounter in run_data.opening_encounters:
 				_add_choice("%s\n%s" % [encounter.enemy_name, _encounter_preview(encounter)],
 					_choose_opening.bind(encounter.enemy_id))
 		RunState.Stage.REWARD:
 			heading.text = "Choose a card reward"
 			message.text = "Choose one provisional Battle Mage card for this run, or skip."
+			if _multi_enemy_route():
+				message.text += " Next encounter: %s." % _run.next_encounter().enemy_name
 			for card in _run.reward_options():
 				_add_choice("%s  ·  %d Mana\n%s" % [card.display_name, card.mana_cost, card.description()],
 					_take_reward.bind(card.id))
 			_add_choice("Skip Reward", _skip_reward)
-		RunState.Stage.BOSS_READY:
+		RunState.Stage.NEXT_READY, RunState.Stage.BOSS_READY:
 			heading.text = "Ready for the boss" if run_data.title.is_empty() else "Ready for the final encounter"
+			var next := _run.next_encounter()
+			if _multi_enemy_route():
+				heading.text = "Ready for %s" % _encounter_title(_run.encounter_id + 1, next)
 			var reward := _run.selected_reward
 			message.text = "Added %s to your run deck." % reward.display_name if reward != null else "Reward skipped."
-			var boss := run_data.boss_encounter
-			_add_choice("Fight %s\n%s" % [boss.enemy_name, _encounter_preview(boss)], _start_boss)
+			_add_choice("Fight %s\n%s" % [next.enemy_name, _encounter_preview(next)], _start_next)
 		RunState.Stage.VICTORY:
 			heading.text = "Run Victory"
 			message.text = "You defeated %s and completed the prototype run." % _run.active_encounter.enemy_name
@@ -71,11 +98,63 @@ func _render_panel(focus_choice := true) -> void:
 			heading.text = "Run Defeat"
 			message.text = "%s ended your run." % _run.active_encounter.enemy_name
 	run_status.text = "Battle Mage  ·  HP %d/%d  ·  Run seed %d" % [_run.current_hp, _run.max_hp, _run.run_seed]
+	if _multi_enemy_route() and _run.encounter_id > 0:
+		run_status.text += "  ·  " + _encounter_title(_run.encounter_id, _run.active_encounter)
 	_render_deck(_run.deck_cards())
-	run_panel.show()
-	if focus_choice:
-		var focus_target: Button = choices.get_child(0) if choices.get_child_count() > 0 else back_button
-		focus_target.grab_focus()
+
+
+func _render_local_panel() -> void:
+	deck_title.hide()
+	deck_list.hide()
+	deck_title.text = ""
+	deck_list.text = ""
+	run_status.text = _encounter_title(_local_run.encounter_id, _local_run.active_encounter)
+	for mage in _local_run.active_combat.players.values():
+		run_status.text += "\n%s  ·  HP %d/%d" % [mage.id, mage.hp, mage.max_hp]
+	match _local_run.stage:
+		CoopRunState.REWARD:
+			var player := LOCAL_MAGES[_local_reward_index]
+			var view := _local_run.view_fields(player)
+			heading.text = "Card reward  ·  %d/%d decisions submitted" % [view.reward_ready, LOCAL_MAGES.size()]
+			if _local_reward_revealed:
+				message.text = "%s: choose a Battle Mage card or skip. Next: %s." % [player, view.next_encounter_name]
+				deck_title.show()
+				deck_list.show()
+				_render_deck(_local_run.deck_cards(player))
+				for card: Dictionary in view.reward_options:
+					_add_choice("%s  ·  %d Mana\n%s" % [card.name, card.cost, card.description],
+						_submit_local_reward.bind(StringName(card.id), player, _local_run.encounter_id))
+				_add_choice("Skip Reward", _submit_local_reward.bind(&"", player, _local_run.encounter_id))
+			else:
+				message.text = "Pass controls to %s. Next: %s." % [player, view.next_encounter_name]
+				_add_choice("Show %s Reward" % player, _show_local_reward.bind(player, _local_run.encounter_id))
+		CoopRunState.VICTORY:
+			heading.text = "Run Victory"
+			message.text = "Your party defeated %s and completed the prototype run." % _local_run.active_encounter.enemy_name
+		CoopRunState.DEFEAT:
+			heading.text = "Run Defeat"
+			message.text = "%s ended your run." % _local_run.active_encounter.enemy_name
+
+
+func _show_local_reward(player: StringName, encounter_id: int) -> void:
+	if (_local_run.stage == CoopRunState.REWARD and not _local_reward_revealed
+			and _local_run.encounter_id == encounter_id and LOCAL_MAGES[_local_reward_index] == player):
+		_local_reward_revealed = true
+		_render_panel()
+
+
+func _submit_local_reward(card_id: StringName, player: StringName, encounter_id: int) -> void:
+	if (not _local_reward_revealed or _local_run.stage != CoopRunState.REWARD
+			or _local_run.encounter_id != encounter_id or LOCAL_MAGES[_local_reward_index] != player):
+		return
+	if not _local_run.submit_reward(player, card_id):
+		return
+	_local_reward_revealed = false
+	if _local_run.stage == CoopRunState.REWARD:
+		_local_reward_index += 1
+		_render_panel()
+	else:
+		_show_local_combat()
 
 
 func _on_pacing_variant_selected(_index: int) -> void:
@@ -89,6 +168,11 @@ func _on_pacing_variant_selected(_index: int) -> void:
 
 
 func _encounter_preview(encounter: EncounterData) -> String:
+	if not encounter.enemies.is_empty():
+		var enemies := PackedStringArray()
+		for enemy in encounter.enemies:
+			enemies.append("%s (%d HP)" % [enemy.display_name, enemy.max_hp])
+		return "  ·  ".join(enemies)
 	if encounter.enemy_attack_pattern.is_empty():
 		return "%d HP  ·  Attacks for %d" % [encounter.enemy_max_hp, encounter.enemy_attack]
 	var attacks := PackedStringArray()
@@ -119,7 +203,7 @@ func _add_choice(label: String, action: Callable) -> void:
 
 func _choose_opening(encounter_id: StringName) -> void:
 	if _run.choose_opening(encounter_id):
-		_show_combat("Opening Encounter")
+		_show_solo_combat("Opening Encounter")
 
 
 func _take_reward(card_id: StringName) -> void:
@@ -132,26 +216,54 @@ func _skip_reward() -> void:
 		_render_panel()
 
 
-func _start_boss() -> void:
-	if _run.start_boss():
-		_show_combat("Boss" if run_data.title.is_empty() else "Final Encounter")
+func _start_next() -> void:
+	if _run.start_next_encounter():
+		_show_solo_combat("Boss" if run_data.title.is_empty() else "Final Encounter")
 
 
-func _show_combat(stage_title: String) -> void:
+func _multi_enemy_route() -> bool:
+	return not run_data.intermediate_encounters.is_empty()
+
+
+func _encounter_title(index: int, encounter: EncounterData) -> String:
+	var label := "Boss: " + encounter.enemy_name if index == run_data.encounter_count() else encounter.enemy_name
+	return "Encounter %d of %d  ·  %s" % [index, run_data.encounter_count(), label]
+
+
+func _show_solo_combat(stage_title: String) -> void:
+	if _multi_enemy_route():
+		stage_title = _encounter_title(_run.encounter_id, _run.active_encounter)
+	_show_combat(_run.active_combat, _run.active_encounter, stage_title)
+
+
+func _show_local_combat() -> void:
+	_show_combat(_local_run.active_combat, _local_run.active_encounter,
+		_encounter_title(_local_run.encounter_id, _local_run.active_encounter))
+
+
+func _show_combat(combat: CombatState, encounter: EncounterData, stage_title: String) -> void:
 	run_panel.hide()
 	_combat_view = COMBAT_SCENE.instantiate()
 	var run_title := "Prototype Run" if run_data.title.is_empty() else run_data.title
-	_combat_view.configure_run(_run.active_combat, _run.active_encounter, "%s  /  %s" % [run_title, stage_title])
+	_combat_view.configure_run(combat, encounter, "%s  /  %s" % [run_title, stage_title])
 	_combat_view.encounter_finished.connect(_finish_encounter)
 	add_child(_combat_view)
 
 
 func _finish_encounter(combat: CombatState) -> void:
-	if _run.finish_combat(combat):
-		remove_child(_combat_view)
-		_combat_view.queue_free()
-		_combat_view = null
-		_render_panel()
+	if local_coop:
+		if (combat != _local_run.active_combat or _combat_view == null
+				or combat.phase not in [CombatState.Phase.VICTORY, CombatState.Phase.DEFEAT]):
+			return
+		_local_run.observe_combat_result()
+		_local_reward_index = 0
+		_local_reward_revealed = false
+	elif not _run.finish_combat(combat):
+		return
+	remove_child(_combat_view)
+	_combat_view.queue_free()
+	_combat_view = null
+	_render_panel()
 
 
 func _on_back_pressed() -> void:

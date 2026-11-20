@@ -6,6 +6,7 @@ const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 
 const OPENING := "opening"
+const INTERMEDIATE := "intermediate"
 const REWARD := "reward"
 const BOSS := "boss"
 const VICTORY := "victory"
@@ -20,7 +21,8 @@ var _data: RunData
 var _player_ids: Array[StringName]
 var _decks: Dictionary[StringName, Array] = {}
 var _current_hps: Dictionary[StringName, int] = {}
-var _submitted: Dictionary[StringName, bool] = {}
+var _reward_choices: Dictionary[StringName, Array] = {}
+var _reward_ready := 0
 var _offers: Array[CardData]
 var _rng := RandomNumberGenerator.new()
 
@@ -33,26 +35,46 @@ func _init(data: RunData, player_ids: Array[StringName]) -> void:
 	for player_id in _player_ids:
 		_decks[player_id] = data.starting_deck.duplicate()
 		_current_hps[player_id] = data.player_max_hp
-	# The localhost prototype uses the first configured solo opening route.
+		_reward_choices[player_id] = []
+	# Co-op uses the first configured opening encounter.
 	_start_encounter(data.opening_encounters[0])
 
 
 func observe_combat_result() -> void:
+	if stage == REWARD or stage == VICTORY or stage == DEFEAT:
+		return
 	match active_combat.phase:
 		CombatState.Phase.DEFEAT:
 			stage = DEFEAT
 		CombatState.Phase.VICTORY:
 			if stage == BOSS:
 				stage = VICTORY
-			elif stage == OPENING:
+			else:
 				for player_id in _player_ids:
 					# The shared resolver has already applied post-victory recovery.
 					_current_hps[player_id] = active_combat.players[player_id].hp
 				stage = REWARD
 
 
+func deck_cards(player_id: StringName) -> Array[CardData]:
+	var cards: Array[CardData] = []
+	cards.assign(_decks.get(player_id, []))
+	return cards
+
+
+## A seat's decisions in encounter order. An empty ID records a skip.
+func reward_choices(player_id: StringName) -> Array[StringName]:
+	var choices: Array[StringName] = []
+	choices.assign(_reward_choices.get(player_id, []))
+	return choices
+
+
 func submit_reward(player_id: StringName, card_id: StringName) -> bool:
-	if stage != REWARD or not _decks.has(player_id) or _submitted.has(player_id):
+	if (stage != REWARD or not _reward_choices.has(player_id)
+			or _reward_choices[player_id].size() != encounter_id - 1):
+		return false
+	var next := _data.encounter_after(encounter_id)
+	if next == null:
 		return false
 	if card_id != &"":
 		var reward: CardData
@@ -63,25 +85,33 @@ func submit_reward(player_id: StringName, card_id: StringName) -> bool:
 		if reward == null:
 			return false
 		_decks[player_id].append(reward)
-	_submitted[player_id] = true
-	if _submitted.size() == _player_ids.size():
-		stage = BOSS
-		_start_encounter(_data.boss_encounter)
+	_reward_choices[player_id].append(card_id)
+	_reward_ready += 1
+	if _reward_ready == _player_ids.size():
+		stage = BOSS if encounter_id + 1 == _data.encounter_count() else INTERMEDIATE
+		_start_encounter(next)
 	return true
 
 
 func view_fields(player_id: StringName) -> Dictionary:
-	var view := {"run_stage": stage, "encounter_id": encounter_id, "run_deck_count": _decks[player_id].size()}
+	var view := {
+		"run_stage": stage, "encounter_id": encounter_id,
+		"encounter_count": _data.encounter_count(), "run_deck_count": _decks[player_id].size(),
+	}
 	if not _data.title.is_empty():
 		view["run_title"] = _data.title
 	if stage == REWARD:
-		var submitted := _submitted.has(player_id)
+		var submitted := _reward_choices[player_id].size() == encounter_id
 		var options: Array[Dictionary] = []
 		if not submitted:
 			for card in _offers:
 				options.append({"id": String(card.id), "name": card.display_name, "cost": card.mana_cost,
 					"description": card.description()})
-		view.merge({"reward_ready": _submitted.size(), "reward_submitted": submitted, "reward_options": options})
+		var next := _data.encounter_after(encounter_id)
+		view.merge({
+			"reward_ready": _reward_ready, "reward_submitted": submitted, "reward_options": options,
+			"next_encounter_name": next.enemy_name if next != null else "",
+		})
 	return view
 
 
@@ -90,4 +120,5 @@ func _start_encounter(definition: EncounterData) -> void:
 	active_encounter.player_max_hp = _data.player_max_hp
 	active_encounter.shuffle_seed = _rng.randi()
 	active_combat = CombatState.new(active_encounter, active_encounter.shuffle_seed, _player_ids, -1, _decks, _current_hps)
+	_reward_ready = 0
 	encounter_id += 1

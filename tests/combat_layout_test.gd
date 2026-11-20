@@ -9,6 +9,7 @@ const SOLO = preload("res://scenes/combat.tscn")
 const LOCAL = preload("res://scenes/local_coop.tscn")
 const STATUS = preload("res://scenes/status_playtest.tscn")
 const RUN = preload("res://scenes/prototype_run.tscn")
+const MULTI_ENEMY_RUN = preload("res://resources/prototype/multi_enemy_run.tres")
 const ENCOUNTER = preload("res://resources/prototype/status_playtest/encounter.tres")
 const MODIFIER_ENCOUNTER = preload("res://resources/prototype/modifier_playtest/encounter.tres")
 const TWO_SLIMES = preload("res://resources/prototype/enemies/two_slimes.tres")
@@ -44,6 +45,8 @@ func _run() -> void:
 		await _test_two_slimes(SOLO, false)
 		await _test_two_slimes(LOCAL, true)
 		await _test_solo_run()
+		await _test_multi_enemy_run(false)
+		await _test_multi_enemy_run(true)
 		await _test_network()
 		_viewport.queue_free()
 		await process_frame
@@ -96,6 +99,87 @@ func _test_solo_run() -> void:
 		var combat := run.get_node("Combat") as Control
 		await _check_combat(combat, "solo run fight")
 	await _close(run)
+
+
+func _test_multi_enemy_run(local_coop: bool) -> void:
+	var run := RUN.instantiate() as Control
+	run.run_data = MULTI_ENEMY_RUN
+	run.local_coop = local_coop
+	_viewport.add_child(run)
+	await _settle()
+	var choices := _control(run, "%Choices")
+	if not local_coop:
+		await _act_on(choices.get_child(0) as Button, "solo multi-enemy opening")
+	await _check_run_encounter(run, "Encounter 1 of 3", "Two Slimes")
+	await _finish_displayed_fight(run)
+	var heading := _control(run, "%Heading") as Label
+	if local_coop:
+		var deck_title := _control(run, "%DeckTitle") as Label
+		var deck_list := _control(run, "%DeckList") as RichTextLabel
+		_check("0/2" in heading.text and choices.get_child_count() == 1 and not deck_title.visible,
+			"local handoff waits for Mage 1 to reveal their reward")
+		await _act_on(choices.get_child(0) as Button, "Mage 1 reward reveal")
+		_check(deck_title.visible and not deck_list.text.is_empty() and choices.get_child_count() > 1,
+			"Mage 1's own deck and choices are visible after reveal")
+		await _act_on(choices.get_child(0) as Button, "Mage 1 reward choice")
+		_check("1/2" in heading.text and not deck_title.visible and deck_list.text.is_empty()
+			and choices.get_child(0).text == "Show Battle Mage 2 Reward",
+			"local reward pass hides Mage 1's choice and deck before Mage 2")
+		await _act_on(choices.get_child(0) as Button, "Mage 2 reward reveal")
+		_check("%d cards" % MULTI_ENEMY_RUN.starting_deck.size() in deck_title.text,
+			"Mage 2 sees their own starting deck before making a choice")
+		await _act_on(choices.get_child(choices.get_child_count() - 1) as Button, "Mage 2 reward skip")
+	else:
+		_check(heading.text == "Choose a card reward" and "Goblin + Treant" in (_control(run, "%Message") as Label).text,
+			"solo reward panel names the next encounter")
+		await _act_on(choices.get_child(0) as Button, "solo multi-enemy reward choice")
+		_check("Encounter 2 of 3" in heading.text, "solo post-reward screen previews encounter two")
+		await _act_on(choices.get_child(0) as Button, "solo second encounter")
+	await _check_run_encounter(run, "Encounter 2 of 3", "Goblin + Treant")
+	await _finish_displayed_fight(run)
+	if local_coop:
+		_check("0/2" in heading.text and choices.get_child(0).text == "Show Battle Mage 1 Reward",
+			"local reward decisions reopen for both Mages after the second encounter")
+		for seat in 2:
+			await _act_on(choices.get_child(0) as Button, "second reward reveal for Mage %d" % (seat + 1))
+			await _act_on(choices.get_child(choices.get_child_count() - 1) as Button,
+				"second reward skip for Mage %d" % (seat + 1))
+	else:
+		await _act_on(choices.get_child(choices.get_child_count() - 1) as Button, "solo second reward skip")
+		await _act_on(choices.get_child(0) as Button, "solo Citadel Warden encounter")
+	await _check_run_encounter(run, "Encounter 3 of 3", "Boss: Citadel Warden")
+	await _finish_displayed_fight(run)
+	_check(heading.text == "Run Victory", "the final encounter reaches the run victory panel")
+	_check_control(_control(run, "%RunBackButton"), "multi-enemy run victory")
+	await _close(run)
+
+
+func _check_run_encounter(run: Control, progress: String, encounter: String) -> void:
+	var combat := run.get_node("Combat") as Control
+	var title := _control(combat, "%TitleLabel") as Label
+	_check(progress in title.text and encounter in title.text, "run combat shows " + progress + " and " + encounter)
+	_check(await _reach(title), "multi-enemy run combat title is fully readable")
+	_check_control(_control(combat, "%EndTurnButton"), "multi-enemy run combat")
+
+
+func _finish_displayed_fight(run: Control) -> void:
+	# Bypass damage here to check the full viewport flow at every size.
+	var combat := run.get_node("Combat") as Control
+	for enemy in combat._state.enemies:
+		enemy.hp = 0
+	combat._state.phase = CombatState.Phase.VICTORY
+	combat._render()
+	await _settle()
+	await _act_on(_control(combat, "%EndTurnButton") as Button, "continue run after combat")
+
+
+func _act_on(button: Button, context: String) -> void:
+	if await _reach(button):
+		_check(not button.disabled, "%s is actionable" % context)
+		_click(button)
+		await _settle()
+	else:
+		_check(false, "%s is reachable" % context)
 
 
 func _test_two_slimes(scene: PackedScene, coop: bool) -> void:
@@ -205,6 +289,16 @@ func _test_network() -> void:
 		await _settle()
 	_check(status_playtest.disabled and modifier_playtest.disabled and not modifier_playtest.button_pressed and "Short Run" in
 		(_control(scene, "%HostButton") as Button).text, "short-run option updates lobby mode and status availability")
+	var variety := _control(scene, "%EnemyVarietyRun") as CheckBox
+	var multi_enemy := _control(scene, "%MultiEnemyRun") as CheckBox
+	await _act_on(variety, "network Enemy Variety selector")
+	await _act_on(multi_enemy, "network Multi-Enemy Short Run selector")
+	_check(multi_enemy.button_pressed and not variety.button_pressed and session.run_data == MULTI_ENEMY_RUN
+		and (_control(scene, "%HostButton") as Button).text == "Host Multi-Enemy Short Run",
+		"network route selection is explicit and deselects Enemy Variety")
+	await _act_on(variety, "network switch back to Enemy Variety")
+	_check(not multi_enemy.button_pressed and variety.button_pressed and session.run_data != MULTI_ENEMY_RUN,
+		"switching back to Enemy Variety clears the multi-enemy route")
 
 	var combat := _control(scene, "%CombatSlot").get_node("Combat") as Control
 	session.party_size = 4
@@ -254,6 +348,19 @@ func _test_network() -> void:
 	for choice in _control(scene, "%RewardChoices").get_children():
 		_check(await _reach(choice), "network reward %s is reachable" % choice.text.get_slice("\n", 0))
 	_check_control(_control(scene, "%SkipReward"), "network reward after choice navigation")
+	session.snapshot.merge({
+		"encounter_id": 2, "encounter_count": 3, "enemy_name": "Goblin + Treant",
+		"run_title": MULTI_ENEMY_RUN.title, "next_encounter_name": "Citadel Warden",
+	}, true)
+	session.changed.emit()
+	await _settle()
+	var run_stage := _control(scene, "%RunStage") as Label
+	var reward_status := _control(scene, "%RewardStatus") as Label
+	_check("Encounter 2 of 3" in run_stage.text and "Goblin + Treant" in run_stage.text
+		and "Citadel Warden" in reward_status.text, "network reward shows the completed and next encounter")
+	_check_control(run_stage, "multi-enemy network reward")
+	_check_control(reward_status, "multi-enemy network reward")
+	_check_control(_control(scene, "%SkipReward"), "multi-enemy network reward")
 	await _close(scene)
 
 

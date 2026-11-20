@@ -3,7 +3,7 @@ param(
     [ValidateRange(1024, 65530)] [int]$BasePort = 27100,
     [ValidateRange(2, 4)] [int[]]$PartySizes = @(2, 3, 4),
     [switch]$Native,
-    [ValidateSet('statuses', 'modifiers', 'enemies', 'enemy-actions', 'multi-enemy', 'ready')] [string]$Playtest = 'statuses',
+    [ValidateSet('statuses', 'modifiers', 'enemies', 'enemy-actions', 'multi-enemy', 'ready', 'multi-enemy-run')] [string]$Playtest = 'statuses',
     [ValidateSet('Buff', 'Block')] [string]$EnemyActionFixture = 'Buff',
     [ValidateSet('TwoSlimes', 'GoblinTreant', 'ThreeEnemies', 'Run', 'Defeat')]
     [string]$MultiEnemyFixture = 'ThreeEnemies'
@@ -18,6 +18,7 @@ $fixtureScript = switch ($Playtest) {
     'enemy-actions' { 'network_enemy_actions_integration.gd' }
     'multi-enemy' { 'network_multi_enemy_integration.gd' }
     'ready' { 'network_ready_integration.gd' }
+    'multi-enemy-run' { 'network_multi_enemy_run_integration.gd' }
     default { 'network_status_integration.gd' }
 }
 $logFolder = Join-Path $env:TEMP ("arcaeme-network-$Playtest-test-" + [Guid]::NewGuid().ToString('N'))

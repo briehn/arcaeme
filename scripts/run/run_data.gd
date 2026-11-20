@@ -10,8 +10,22 @@ const BATTLE_MAGE := &"battle_mage"
 @export var player_max_hp: int
 @export var starting_deck: Array[CardData] = []
 @export var opening_encounters: Array[EncounterData] = []
+## Fixed encounters after the chosen opening and before the boss.
+@export var intermediate_encounters: Array[EncounterData] = []
 @export var boss_encounter: EncounterData
 @export var reward_candidates: Array[CardData] = []
+
+
+func encounter_count() -> int:
+	return intermediate_encounters.size() + 2
+
+
+func encounter_after(encounter_id: int) -> EncounterData:
+	if encounter_id < 1 or encounter_id >= encounter_count():
+		return null
+	if encounter_id <= intermediate_encounters.size():
+		return intermediate_encounters[encounter_id - 1]
+	return boss_encounter
 
 
 func eligible_rewards(class_id: StringName) -> Array[CardData]:
