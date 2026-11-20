@@ -8,7 +8,7 @@ const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
 const PLAYER_ID := &"Battle Mage"
 
 signal encounter_finished(combat: CombatState)
-signal network_card_requested(copy_id: int)
+signal network_card_requested(copy_id: int, target_id: StringName)
 signal network_end_turn_requested
 
 @export var encounter: EncounterData
@@ -17,6 +17,9 @@ signal network_end_turn_requested
 @onready var turn_label: Label = %TurnLabel
 @onready var player_label: Label = %PlayerLabel
 @onready var enemy_label: Label = %EnemyLabel
+@onready var enemy_picker: VBoxContainer = %EnemyPicker
+@onready var target_label: Label = %TargetLabel
+@onready var enemy_targets: HFlowContainer = %EnemyTargets
 @onready var cards_label: Label = %CardsLabel
 @onready var player_selector: HFlowContainer = %PlayerSelector
 @onready var hand_cards: HFlowContainer = %HandCards
@@ -30,6 +33,12 @@ var _shown_log_lines := 0
 var _run_title: String
 var _network_mode := false
 var _displayed_encounter := -1
+var _snapshot: Dictionary = {}
+var _input_allowed := false
+var _selected_target_id: StringName
+var _living_enemy_ids: Array[StringName] = []
+var _enemy_buttons: Dictionary[StringName, WrappedTextButton] = {}
+var _enemy_button_group := ButtonGroup.new()
 
 
 func configure_run(combat: CombatState, run_encounter: EncounterData, title: String) -> void:
@@ -55,6 +64,11 @@ func clear_network_view() -> void:
 	combat_log.clear()
 	_shown_log_lines = 0
 	_displayed_encounter = -1
+	_snapshot = {}
+	_input_allowed = false
+	_selected_target_id = &""
+	_living_enemy_ids.clear()
+	_clear_enemy_buttons()
 	_render_hand([], false)
 
 
@@ -80,6 +94,8 @@ func _render() -> void:
 
 
 func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
+	_snapshot = snapshot
+	_input_allowed = input_allowed
 	var party := snapshot["players"] as Array
 	var coop := party.size() > 1
 	var phase: int = snapshot["phase"]
@@ -95,15 +111,7 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 	for party_member in party:
 		stats.append(_player_stats(party_member, coop, phase))
 	player_label.text = "\n".join(stats)
-	enemy_label.text = "%s   ·   HP %d/%d" % [
-		snapshot["enemy_name"], snapshot["enemy_hp"], snapshot["enemy_max_hp"]]
-	var enemy_block: int = snapshot.get("enemy_block", 0)
-	if enemy_block > 0:
-		enemy_label.text += "   ·   Block %d" % enemy_block
-	enemy_label.text += _modifier_counters(snapshot.get("enemy_strength", 0), snapshot.get("enemy_dexterity", 0))
-	enemy_label.text += _status_counters(snapshot.get("enemy_poison", 0), snapshot.get("enemy_burning", 0))
-	if in_combat:
-		enemy_label.text += "   ·   Intent: " + _enemy_intent(snapshot, coop)
+	_render_enemies(snapshot, in_combat, coop)
 	var hand: Array = snapshot["hand"]
 	cards_label.text = "Hand %d   ·   Draw pile %d   ·   Discard pile %d" % [
 		hand.size(), snapshot["draw_count"], snapshot["discard_count"]]
@@ -123,9 +131,95 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 		_shown_log_lines += 1
 
 
-func _enemy_intent(snapshot: Dictionary, coop: bool) -> String:
-	var intent: Dictionary = snapshot.get("enemy_intent", {})
-	var amount: int = intent.get("amount", snapshot.get("enemy_attack", 0))
+func _render_enemies(snapshot: Dictionary, in_combat: bool, coop: bool) -> void:
+	var enemies: Array = snapshot.get("enemies", [])
+	_living_enemy_ids.clear()
+	for enemy: Dictionary in enemies:
+		if enemy.alive:
+			_living_enemy_ids.append(StringName(enemy.id))
+	if _living_enemy_ids.size() == 1:
+		_selected_target_id = _living_enemy_ids[0]
+	elif not _living_enemy_ids.has(_selected_target_id):
+		_selected_target_id = &""
+	enemy_picker.visible = enemies.size() > 1
+	enemy_label.visible = not enemy_picker.visible
+	if enemy_label.visible:
+		_render_single_enemy(snapshot, in_combat, coop)
+		return
+	_render_enemy_picker(enemies, in_combat, coop)
+
+
+func _render_single_enemy(snapshot: Dictionary, in_combat: bool, coop: bool) -> void:
+	enemy_label.text = "%s   ·   HP %d/%d" % [
+		snapshot["enemy_name"], snapshot["enemy_hp"], snapshot["enemy_max_hp"]]
+	var enemy_block: int = snapshot.get("enemy_block", 0)
+	if enemy_block > 0:
+		enemy_label.text += "   ·   Block %d" % enemy_block
+	enemy_label.text += _modifier_counters(snapshot.get("enemy_strength", 0), snapshot.get("enemy_dexterity", 0))
+	enemy_label.text += _status_counters(snapshot.get("enemy_poison", 0), snapshot.get("enemy_burning", 0))
+	if in_combat:
+		var intent: Dictionary = snapshot.get("enemy_intent", {"amount": snapshot.get("enemy_attack", 0)})
+		enemy_label.text += "   ·   Intent: " + _enemy_intent(intent, coop,
+			snapshot.get("enemy_poison_per_attack", 0), snapshot.get("enemy_burning_per_attack", 0))
+
+
+func _render_enemy_picker(enemies: Array, in_combat: bool, coop: bool) -> void:
+	var name_counts: Dictionary[String, int] = {}
+	var name_indices: Dictionary[String, int] = {}
+	for enemy: Dictionary in enemies:
+		name_counts[enemy.name] = name_counts.get(enemy.name, 0) + 1
+	target_label.visible = in_combat
+	target_label.text = "Choose an enemy to play a targeted card."
+	for index in enemies.size():
+		var enemy: Dictionary = enemies[index]
+		var enemy_id := StringName(enemy.id)
+		var enemy_name: String = enemy.name
+		if name_counts[enemy_name] > 1:
+			name_indices[enemy_name] = name_indices.get(enemy_name, 0) + 1
+			enemy_name = "%s (%d)" % [enemy_name, name_indices[enemy_name]]
+		var button: WrappedTextButton = _enemy_buttons.get(enemy_id)
+		if button == null:
+			button = WrappedTextButton.new()
+			button.custom_minimum_size = Vector2(250, 78)
+			button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			button.toggle_mode = true
+			button.button_group = _enemy_button_group
+			button.pressed.connect(_on_enemy_selected.bind(enemy_id))
+			enemy_targets.add_child(button)
+			_enemy_buttons[enemy_id] = button
+		var details := "%s\nHP %d/%d   ·   Block %d" % [enemy_name, enemy.hp, enemy.max_hp, enemy.block]
+		details += _modifier_counters(enemy.strength, enemy.dexterity)
+		details += _status_counters(enemy.poison, enemy.burning)
+		if not enemy.alive:
+			details += "\nDefeated"
+		elif in_combat:
+			details += "\nIntent: " + _enemy_intent(enemy.intent, coop, enemy.attack_poison, enemy.attack_burning)
+		button.set_wrapped_text(details)
+		button.disabled = not in_combat or not _input_allowed or not enemy.alive
+		var is_target := in_combat and _selected_target_id == enemy_id
+		button.set_pressed_no_signal(is_target)
+		if is_target:
+			target_label.text = "Target: " + enemy_name
+		enemy_targets.move_child(button, index)
+
+
+func _clear_enemy_buttons() -> void:
+	for button in _enemy_buttons.values():
+		enemy_targets.remove_child(button)
+		button.queue_free()
+	_enemy_buttons.clear()
+
+
+func _on_enemy_selected(enemy_id: StringName) -> void:
+	var button: Button = _enemy_buttons.get(enemy_id)
+	if button == null or button.disabled or not _living_enemy_ids.has(enemy_id):
+		return
+	_selected_target_id = enemy_id
+	_render_snapshot(_snapshot, _input_allowed)
+
+
+func _enemy_intent(intent: Dictionary, coop: bool, poison_per_attack: int, burning_per_attack: int) -> String:
+	var amount: int = intent.get("amount", 0)
 	match intent.get("kind", EnemyAction.Kind.ATTACK):
 		EnemyAction.Kind.BLOCK:
 			return "Gain %d Block" % amount
@@ -133,8 +227,6 @@ func _enemy_intent(snapshot: Dictionary, coop: bool) -> String:
 			return "Gain %d Strength" % amount
 	var attack := "Attack all living players for %d damage each" if coop else "Attack for %d damage"
 	var description := attack % amount
-	var poison_per_attack: int = snapshot.get("enemy_poison_per_attack", 0)
-	var burning_per_attack: int = snapshot.get("enemy_burning_per_attack", 0)
 	if poison_per_attack > 0 or burning_per_attack > 0:
 		description += "\nOn surviving targets" + _status_counters(poison_per_attack, burning_per_attack)
 	return description
@@ -223,7 +315,9 @@ func _render_hand(hand: Array, input_allowed: bool) -> void:
 			hand_cards.add_child(button)
 			_card_buttons[copy_id] = button
 		hand_cards.move_child(button, hand_index)
-		button.disabled = not input_allowed or not card.playable
+		var targets_enemy: bool = card.get("targets_enemy", false)
+		button.set_meta("targets_enemy", targets_enemy)
+		button.disabled = not input_allowed or not card.playable or (targets_enemy and _selected_target_id == &"")
 		if refresh_focus and not button.disabled:
 			button.grab_focus()
 			refresh_focus = false
@@ -235,10 +329,17 @@ func _render_hand(hand: Array, input_allowed: bool) -> void:
 
 
 func _on_card_pressed(copy_id: int) -> void:
-	if _network_mode:
-		network_card_requested.emit(copy_id)
+	var button: Button = _card_buttons.get(copy_id)
+	if button == null or button.disabled:
 		return
-	var target := encounter.enemy_id if _state.card_data(copy_id).targets_enemy() else &""
+	var target: StringName = &""
+	if button.get_meta("targets_enemy"):
+		if not _living_enemy_ids.has(_selected_target_id):
+			return
+		target = _selected_target_id
+	if _network_mode:
+		network_card_requested.emit(copy_id, target)
+		return
 	if _state.play_card(_selected_player_id, copy_id, target):
 		_render()
 

@@ -53,7 +53,8 @@ func _start() -> void:
 		var party: OptionButton = current_scene.get_node("%PartySize")
 		var enemies: OptionButton = current_scene.get_node("%EnemyPlaytest")
 		var index := 5 if _defensive_fixture else 4
-		if enemies.selected != 0 or enemies.get_item_text(index) != _fixture.enemy_name:
+		var fixture_label := _fixture.enemy_name + (" (Block fixture)" if _defensive_fixture else " (Strength fixture)")
+		if enemies.selected != 0 or enemies.get_item_text(index) != fixture_label:
 			_fail("Enemy action fixtures must be selectable beside the default enemy.")
 			return
 		party.select(party.get_item_index(_size))

@@ -83,7 +83,10 @@ func _play_combat_command(player_id: StringName, request: Dictionary) -> bool:
 		copy_id += _state.players[player_id].first_copy_id
 	if not _state.players[player_id].hand.has(copy_id):
 		return false
-	var target := _encounter.enemy_id if _state.card_data(copy_id).targets_enemy() else &""
+	var target := StringName(request.get("target", ""))
+	# Older single-enemy callers can still omit the target field.
+	if not request.has("target") and _state.enemies.size() == 1 and _state.card_data(copy_id).targets_enemy():
+		target = _state.enemies[0].id
 	return _state.play_card(player_id, copy_id, target)
 
 
@@ -101,7 +104,9 @@ func _valid_shape(request: Dictionary) -> bool:
 	var run_fields := 1 if _run != null else 0
 	match request["kind"]:
 		Command.PLAY_CARD:
-			return request.size() == 6 + run_fields and request.get("copy") is int
+			var target_fields := 1 if request.has("target") else 0
+			return request.size() == 6 + run_fields + target_fields and request.get("copy") is int \
+				and (not request.has("target") or request["target"] is String)
 		Command.END_TURN:
 			return request.size() == 5 + run_fields
 	return false

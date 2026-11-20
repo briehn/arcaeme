@@ -3,8 +3,10 @@ param(
     [ValidateRange(1024, 65530)] [int]$BasePort = 27100,
     [ValidateRange(2, 4)] [int[]]$PartySizes = @(2, 3, 4),
     [switch]$Native,
-    [ValidateSet('statuses', 'modifiers', 'enemies', 'enemy-actions')] [string]$Playtest = 'statuses',
-    [ValidateSet('Buff', 'Block')] [string]$EnemyActionFixture = 'Buff'
+    [ValidateSet('statuses', 'modifiers', 'enemies', 'enemy-actions', 'multi-enemy')] [string]$Playtest = 'statuses',
+    [ValidateSet('Buff', 'Block')] [string]$EnemyActionFixture = 'Buff',
+    [ValidateSet('TwoSlimes', 'GoblinTreant', 'ThreeEnemies', 'Run', 'Defeat')]
+    [string]$MultiEnemyFixture = 'ThreeEnemies'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,6 +16,7 @@ $fixtureScript = switch ($Playtest) {
     'modifiers' { 'network_modifiers_integration.gd' }
     'enemies' { 'network_enemy_patterns_integration.gd' }
     'enemy-actions' { 'network_enemy_actions_integration.gd' }
+    'multi-enemy' { 'network_multi_enemy_integration.gd' }
     default { 'network_status_integration.gd' }
 }
 $logFolder = Join-Path $env:TEMP ("arcaeme-network-$Playtest-test-" + [Guid]::NewGuid().ToString('N'))
@@ -27,6 +30,7 @@ function Start-Participant([int]$Port, [int]$Size, [int]$Seat, [string]$ReleaseP
         '--script', "res://tests/$fixtureScript", '--', $Port, $Size, $Seat,
         ('"' + $ReleasePath + '"'))
     if ($Playtest -eq 'enemy-actions') { $arguments += $EnemyActionFixture }
+    if ($Playtest -eq 'multi-enemy') { $arguments += $MultiEnemyFixture }
     $process = Start-Process -FilePath $engine -ArgumentList $arguments -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput "$prefix.stdout" -RedirectStandardError "$prefix.stderr"
     return @{ Process = $process; Output = "$prefix.stdout"; Errors = "$prefix.stderr" }
@@ -58,6 +62,14 @@ function Test-Party([int]$Size, [int]$Port) {
         foreach ($participant in ($participants | Select-Object -Skip 1)) {
             if ((Wait-Marker $participant '^RESULT ') -ne $baseline) {
                 throw "Public snapshots disagreed for the $Size-player $Playtest encounter. Logs in $logFolder."
+            }
+        }
+        if ($Playtest -eq 'multi-enemy' -and $MultiEnemyFixture -ne 'Defeat') {
+            $participantLogs = @($participants | ForEach-Object { $_.Output })
+            foreach ($probe in @('UNKNOWN', 'DEAD')) {
+                if (-not (Select-String -LiteralPath $participantLogs -Pattern "^PROBE $probe$" -Quiet)) {
+                    throw "No $probe target rejection observed for $Size seats. Logs in $logFolder."
+                }
             }
         }
         New-Item -ItemType File -Path $releasePath | Out-Null

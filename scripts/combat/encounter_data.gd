@@ -2,9 +2,12 @@ extends Resource
 
 const CardData = preload("res://scripts/combat/card_data.gd")
 const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
+const EnemyData = preload("res://scripts/combat/enemy_data.gd")
 
 @export_group("Provisional Playtest Fixture")
 @export var player_max_hp: int
+## When set, these enemies act in array order. Empty uses the existing single-enemy fields.
+@export var enemies: Array[EnemyData] = []
 @export var enemy_id: StringName
 @export var enemy_name: String
 @export var enemy_max_hp: int
@@ -20,3 +23,18 @@ const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
 @export var enemy_burning_per_attack: int
 @export var enemy_starting_strength: int
 @export var enemy_starting_dexterity: int
+
+
+func legacy_enemy_data() -> EnemyData:
+	var enemy := EnemyData.new()
+	enemy.id = enemy_id
+	enemy.display_name = enemy_name
+	enemy.max_hp = enemy_max_hp
+	enemy.attack = enemy_attack
+	enemy.attack_pattern = enemy_attack_pattern
+	enemy.action_cycle = action_cycle
+	enemy.poison_per_attack = enemy_poison_per_attack
+	enemy.burning_per_attack = enemy_burning_per_attack
+	enemy.starting_strength = enemy_starting_strength
+	enemy.starting_dexterity = enemy_starting_dexterity
+	return enemy

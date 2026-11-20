@@ -11,9 +11,11 @@ const STATUS = preload("res://scenes/status_playtest.tscn")
 const RUN = preload("res://scenes/prototype_run.tscn")
 const ENCOUNTER = preload("res://resources/prototype/status_playtest/encounter.tres")
 const MODIFIER_ENCOUNTER = preload("res://resources/prototype/modifier_playtest/encounter.tres")
+const TWO_SLIMES = preload("res://resources/prototype/enemies/two_slimes.tres")
+const THREE_ENEMIES = preload("res://resources/prototype/enemies/three_enemies.tres")
 const REVERSAL = preload("res://resources/prototype/cards/arcane_reversal.tres")
 const NAMES: Array[StringName] = [&"Battle Mage 1", &"Battle Mage 2", &"Battle Mage 3", &"Battle Mage 4"]
-const VIEWPORT_SIZES := [Vector2i(1280, 720), Vector2i(1920, 1080), Vector2i(960, 540)]
+const VIEWPORT_SIZES := [Vector2i(960, 540), Vector2i(1024, 576), Vector2i(1280, 720), Vector2i(1920, 1080)]
 
 var _viewport: SubViewport
 var _size: Vector2i
@@ -39,6 +41,8 @@ func _run() -> void:
 		await _test_combat(SOLO, "solo", false)
 		await _test_combat(LOCAL, "local co-op", false)
 		await _test_combat(STATUS, "solo status", true)
+		await _test_two_slimes(SOLO, false)
+		await _test_two_slimes(LOCAL, true)
 		await _test_solo_run()
 		await _test_network()
 		_viewport.queue_free()
@@ -92,6 +96,43 @@ func _test_solo_run() -> void:
 		var combat := run.get_node("Combat") as Control
 		await _check_combat(combat, "solo run fight")
 	await _close(run)
+
+
+func _test_two_slimes(scene: PackedScene, coop: bool) -> void:
+	var combat := scene.instantiate() as Control
+	combat.encounter = TWO_SLIMES
+	_viewport.add_child(combat)
+	await _settle()
+	var context := "local co-op Two Slimes" if coop else "solo Two Slimes"
+	if coop:
+		var player_two := _control(combat, "%PlayerSelector").get_child(1) as Button
+		if await _reach(player_two):
+			_click(player_two)
+			await _settle()
+		_check((_control(combat, "%CardsLabel") as Label).text.begins_with(NAMES[1]),
+			"local co-op target selection uses the second player's hand")
+	var targets := _control(combat, "%EnemyTargets")
+	var first := targets.get_child(0) as Button
+	var second := targets.get_child(1) as Button
+	var prompt := _control(combat, "%TargetLabel") as Label
+	var attack := _card(combat, "Basic Strike" if coop else "Arcane Reversal")
+	var defense := _card(combat, "Basic Block" if coop else "Arcane Guard")
+	_check(targets.get_child_count() == 2 and first.text.begins_with("Slime (1)") and
+		second.text.begins_with("Slime (2)"), context + " has separate selectable displays for duplicate Slimes")
+	_check(prompt.text.begins_with("Choose an enemy") and attack != null and attack.disabled and
+		defense != null and not defense.disabled, context + " gates only enemy-targeted cards")
+	if await _reach(second):
+		_click(second)
+		await _settle()
+	_check(second.button_pressed and not first.button_pressed and prompt.text == "Target: Slime (2)" and
+		attack != null and not attack.disabled, context + " viewport input selects the second Slime and enables its attack")
+	if attack != null and await _reach(attack):
+		_click(attack)
+		await _settle()
+	var expected_hp := "HP 16/22" if coop else "HP 14/22"
+	_check("HP 18/18" in first.text and expected_hp in second.text, context + " viewport card input damages only the chosen Slime")
+	_check_control(_control(combat, "%EndTurnButton"), context + " after targeting")
+	await _close(combat)
 
 
 func _test_network() -> void:
@@ -156,6 +197,7 @@ func _test_network() -> void:
 		await _settle()
 	_check(_end_requests == previous_requests + 1, "network End Turn emits its command from viewport input")
 	await _test_long_hand(session, combat, snapshot)
+	await _test_network_enemy_picker(session, combat)
 
 	session.snapshot = _reward_snapshot(snapshot)
 	session.changed.emit()
@@ -168,6 +210,89 @@ func _test_network() -> void:
 		_check(await _reach(choice), "network reward %s is reachable" % choice.text.get_slice("\n", 0))
 	_check_control(_control(scene, "%SkipReward"), "network reward after choice navigation")
 	await _close(scene)
+
+
+func _test_network_enemy_picker(session: NetworkSession, combat: Control) -> void:
+	# Give the fixture a status-test hand to include a targeted card without the Attack flag.
+	var state := CombatState.new(THREE_ENEMIES, THREE_ENEMIES.shuffle_seed, NAMES, -1,
+		{NAMES[0]: ENCOUNTER.test_deck})
+	var goblin_state := state.enemy_state(&"goblin")
+	goblin_state.block = 6
+	goblin_state.strength = 2
+	goblin_state.dexterity = 3
+	goblin_state.poison = 4
+	goblin_state.burning = 5
+	session.snapshot = ViewSnapshot.build(state, THREE_ENEMIES, NAMES[0])
+	session.snapshot["encounter_id"] = 1
+	session.changed.emit()
+	await _settle()
+	var targets := _control(combat, "%EnemyTargets")
+	var prompt := _control(combat, "%TargetLabel") as Label
+	_check(targets.get_child_count() == 3 and not _control(combat, "%EnemyLabel").visible,
+		"four-player network combat shows all three enemies in the target picker")
+	for button: Button in targets.get_children():
+		_check(await _reach(button), "network enemy display %s is reachable" % button.text.get_slice("\n", 0))
+		_check_button_text(button, button.text.get_slice("\n", 0) + "'s status and intent")
+	var goblin := targets.get_child(1) as Button
+	var treant := targets.get_child(2) as Button
+	_check("Block 6" in goblin.text and "Poison 4" in goblin.text and "Burning 5" in goblin.text and
+		"Dexterity 3" in goblin.text and "Strength 2" in goblin.text and "for 4 damage each" in goblin.text,
+		"Goblin displays its own counters and effective attack")
+	_check("Gain 6 Block" in treant.text and "Poison 4" not in treant.text,
+		"Treant independently displays its Block intent")
+	var targeted := _card(combat, "Test Toxic Spark")
+	var defensive := _card(combat, "Basic Block")
+	_check(targeted.disabled and not defensive.disabled,
+		"a targeted status card waits for selection while defensive cards remain usable")
+
+	var requests: Array[StringName] = []
+	combat.network_card_requested.disconnect(session.submit_card)
+	var record_target := func(_copy_id: int, target_id: StringName): requests.append(target_id)
+	combat.network_card_requested.connect(record_target)
+	if await _reach(defensive):
+		_click(defensive)
+		await _settle()
+	if await _reach(goblin):
+		_click(goblin)
+		await _settle()
+	if await _reach(targeted):
+		_click(targeted)
+		await _settle()
+	_check(goblin.button_pressed and prompt.text == "Target: Goblin" and requests == [&"", &"goblin"],
+		"viewport plays send an empty target for Block and the instance ID for a targeted card")
+	goblin_state.hp = 0
+	session.snapshot = ViewSnapshot.build(state, THREE_ENEMIES, NAMES[0])
+	session.snapshot["encounter_id"] = 1
+	session.changed.emit()
+	await _settle()
+	goblin.pressed.emit()
+	targeted.pressed.emit()
+	_check(goblin.disabled and "Defeated" in goblin.text and "Intent" not in goblin.text and
+		prompt.text.begins_with("Choose an enemy") and not goblin.button_pressed and
+		targeted.disabled and requests.size() == 2, "defeated targets clear selection and prevent stale card requests")
+
+	state.enemy_state(&"treant").hp = 0
+	session.snapshot = ViewSnapshot.build(state, THREE_ENEMIES, NAMES[0])
+	session.snapshot["encounter_id"] = 1
+	session.changed.emit()
+	await _settle()
+	if await _reach(targeted):
+		_click(targeted)
+		await _settle()
+	_check(prompt.text == "Target: Slime" and requests == [&"", &"goblin", &"slime"],
+		"the sole living enemy becomes the visible target without another click")
+
+	var next_state := CombatState.new(THREE_ENEMIES, THREE_ENEMIES.shuffle_seed, NAMES, -1,
+		{NAMES[0]: ENCOUNTER.test_deck})
+	session.snapshot = ViewSnapshot.build(next_state, THREE_ENEMIES, NAMES[0])
+	session.snapshot["encounter_id"] = 2
+	session.changed.emit()
+	await _settle()
+	_check(prompt.text.begins_with("Choose an enemy") and _card(combat, "Test Toxic Spark").disabled,
+		"a new encounter clears the previous selection even when enemy IDs are reused")
+	_check_control(_control(combat, "%EndTurnButton"), "network enemy picker after targeting")
+	combat.network_card_requested.disconnect(record_target)
+	combat.network_card_requested.connect(session.submit_card)
 
 
 func _test_long_hand(session: NetworkSession, combat: Control, snapshot: Dictionary) -> void:
@@ -187,7 +312,7 @@ func _test_long_hand(session: NetworkSession, combat: Control, snapshot: Diction
 	await _settle()
 	_check(last.has_focus() and _fully_visible(last), "focusing the last card scrolls its full button into view (rect %s)" %
 		last.get_global_rect())
-	_check_card_text(last)
+	_check_button_text(last, "Arcane Reversal's wrapped text")
 	_check_control(_control(combat, "%EndTurnButton"), "expanded hand after last-card focus")
 
 
@@ -214,7 +339,7 @@ func _check_combat(combat: Control, context: String) -> void:
 	_check_control(_control(combat, "%EndTurnButton"), context + " after hand navigation")
 
 
-func _check_card_text(button: Button) -> void:
+func _check_button_text(button: Button, context: String) -> void:
 	var style := button.get_theme_stylebox("normal")
 	var padding := style.get_minimum_size()
 	var paragraph := TextParagraph.new()
@@ -223,7 +348,7 @@ func _check_card_text(button: Button) -> void:
 	paragraph.add_string(button.text, button.get_theme_font("font"), button.get_theme_font_size("font_size"))
 	var text_height := paragraph.get_size().y
 	_check(text_height <= button.size.y - padding.y + 1.0,
-		"Arcane Reversal's wrapped text fits (%0.1f of %0.1f usable pixels)" % [text_height, button.size.y - padding.y])
+		"%s fits (%0.1f of %0.1f usable pixels)" % [context, text_height, button.size.y - padding.y])
 
 
 func _control(scene: Node, path: NodePath) -> Control:

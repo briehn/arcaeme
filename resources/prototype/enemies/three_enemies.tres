@@ -1,0 +1,69 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/encounter_data.gd" id="encounter"]
+[ext_resource type="Script" path="res://scripts/combat/enemy_data.gd" id="enemy"]
+[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="card"]
+[ext_resource type="Script" path="res://scripts/combat/enemy_action.gd" id="action"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/basic_strike.tres" id="basic_strike"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/basic_block.tres" id="basic_block"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_guard.tres" id="arcane_guard"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/shieldstrike.tres" id="shieldstrike"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/battle_preparation.tres" id="battle_preparation"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_reversal.tres" id="arcane_reversal"]
+
+[sub_resource type="Resource" id="slime"]
+script = ExtResource("enemy")
+id = &"slime"
+display_name = "Slime"
+max_hp = 25
+attack = 3
+
+[sub_resource type="Resource" id="goblin_action_0"]
+script = ExtResource("action")
+kind = 0
+amount = 2
+
+[sub_resource type="Resource" id="goblin_action_1"]
+script = ExtResource("action")
+kind = 2
+amount = 1
+
+[sub_resource type="Resource" id="goblin_action_2"]
+script = ExtResource("action")
+kind = 0
+amount = 3
+
+[sub_resource type="Resource" id="goblin"]
+script = ExtResource("enemy")
+id = &"goblin"
+display_name = "Goblin"
+max_hp = 29
+action_cycle = Array[ExtResource("action")]([SubResource("goblin_action_0"), SubResource("goblin_action_1"), SubResource("goblin_action_2")])
+poison_per_attack = 1
+
+[sub_resource type="Resource" id="treant_action_0"]
+script = ExtResource("action")
+kind = 1
+amount = 6
+
+[sub_resource type="Resource" id="treant_action_1"]
+script = ExtResource("action")
+kind = 0
+amount = 3
+
+[sub_resource type="Resource" id="treant"]
+script = ExtResource("enemy")
+id = &"treant"
+display_name = "Treant"
+max_hp = 33
+action_cycle = Array[ExtResource("action")]([SubResource("treant_action_0"), SubResource("treant_action_1")])
+burning_per_attack = 1
+
+[resource]
+script = ExtResource("encounter")
+player_max_hp = 36
+enemy_id = &"three_enemies"
+enemy_name = "Three Enemies"
+shuffle_seed = 104774
+test_deck = Array[ExtResource("card")]([ExtResource("basic_strike"), ExtResource("basic_strike"), ExtResource("basic_strike"), ExtResource("basic_strike"), ExtResource("basic_strike"), ExtResource("basic_block"), ExtResource("basic_block"), ExtResource("basic_block"), ExtResource("basic_block"), ExtResource("arcane_guard"), ExtResource("arcane_guard"), ExtResource("shieldstrike"), ExtResource("shieldstrike"), ExtResource("battle_preparation"), ExtResource("battle_preparation"), ExtResource("arcane_reversal"), ExtResource("arcane_reversal")])
+enemies = Array[ExtResource("enemy")]([SubResource("slime"), SubResource("goblin"), SubResource("treant")])

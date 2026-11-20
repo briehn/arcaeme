@@ -1,0 +1,34 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/encounter_data.gd" id="encounter"]
+[ext_resource type="Script" path="res://scripts/combat/enemy_data.gd" id="enemy"]
+[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="card"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/basic_strike.tres" id="basic_strike"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/basic_block.tres" id="basic_block"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_guard.tres" id="arcane_guard"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/shieldstrike.tres" id="shieldstrike"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/battle_preparation.tres" id="battle_preparation"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_reversal.tres" id="arcane_reversal"]
+
+[sub_resource type="Resource" id="slime_1"]
+script = ExtResource("enemy")
+id = &"slime_1"
+display_name = "Slime"
+max_hp = 18
+attack = 3
+
+[sub_resource type="Resource" id="slime_2"]
+script = ExtResource("enemy")
+id = &"slime_2"
+display_name = "Slime"
+max_hp = 22
+attack = 4
+
+[resource]
+script = ExtResource("encounter")
+player_max_hp = 36
+enemy_id = &"two_slimes"
+enemy_name = "Two Slimes"
+shuffle_seed = 104774
+test_deck = Array[ExtResource("card")]([ExtResource("basic_strike"), ExtResource("basic_strike"), ExtResource("basic_strike"), ExtResource("basic_strike"), ExtResource("basic_strike"), ExtResource("basic_block"), ExtResource("basic_block"), ExtResource("basic_block"), ExtResource("basic_block"), ExtResource("arcane_guard"), ExtResource("arcane_guard"), ExtResource("shieldstrike"), ExtResource("shieldstrike"), ExtResource("battle_preparation"), ExtResource("battle_preparation"), ExtResource("arcane_reversal"), ExtResource("arcane_reversal")])
+enemies = Array[ExtResource("enemy")]([SubResource("slime_1"), SubResource("slime_2")])

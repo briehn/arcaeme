@@ -3,6 +3,14 @@ extends Button
 var _initial_minimum_height: float
 
 
+func set_wrapped_text(value: String) -> void:
+	if text == value:
+		return
+	text = value
+	if is_node_ready():
+		_fit_wrapped_text()
+
+
 func _ready() -> void:
 	_initial_minimum_height = custom_minimum_size.y
 	resized.connect(_fit_wrapped_text)

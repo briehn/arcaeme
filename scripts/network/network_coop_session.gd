@@ -68,8 +68,8 @@ func can_submit() -> bool:
 	return status == Status.ACTIVE and _pending_sequence == 0
 
 
-func submit_card(copy_id: int) -> bool:
-	return _submit(Authority.Command.PLAY_CARD, copy_id)
+func submit_card(copy_id: int, target_id: StringName = &"") -> bool:
+	return _submit(Authority.Command.PLAY_CARD, copy_id, "", target_id)
 
 
 func submit_end_turn() -> bool:
@@ -231,7 +231,7 @@ func _close_transport() -> void:
 		peer.close()
 
 
-func _submit(kind: Authority.Command, copy_id: int = -1, reward_id := "") -> bool:
+func _submit(kind: Authority.Command, copy_id: int = -1, reward_id := "", target_id: StringName = &"") -> bool:
 	if not can_submit():
 		return false
 	_next_sequence += 1
@@ -246,6 +246,8 @@ func _submit(kind: Authority.Command, copy_id: int = -1, reward_id := "") -> boo
 		request["phase"] = snapshot["phase"]
 		if kind == Authority.Command.PLAY_CARD:
 			request["copy"] = copy_id
+			if target_id != &"":
+				request["target"] = String(target_id)
 	if hosting:
 		_handle_command(SERVER_ID, request)
 	else:

@@ -4,6 +4,8 @@ const CardData = preload("res://scripts/combat/card_data.gd")
 const CardEffect = preload("res://scripts/combat/card_effect.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
+const EnemyData = preload("res://scripts/combat/enemy_data.gd")
+const EnemyState = preload("res://scripts/combat/enemy_state.gd")
 
 enum Phase { PLAYER, ENEMY, VICTORY, DEFEAT }
 
@@ -33,17 +35,31 @@ class PlayerState:
 var phase: Phase = Phase.PLAYER
 var round_number: int
 var shuffle_seed: int
-var enemy_hp: int
-var enemy_block: int
-var enemy_strength: int
-var enemy_dexterity: int
-var enemy_poison: int
-var enemy_burning: int
+var enemies: Array[EnemyState] = []
+# Legacy single-enemy callers read or set the first enemy through these properties.
+var enemy_hp: int:
+	get: return enemies[0].hp
+	set(value): enemies[0].hp = value
+var enemy_block: int:
+	get: return enemies[0].block
+	set(value): enemies[0].block = value
+var enemy_strength: int:
+	get: return enemies[0].strength
+	set(value): enemies[0].strength = value
+var enemy_dexterity: int:
+	get: return enemies[0].dexterity
+	set(value): enemies[0].dexterity = value
+var enemy_poison: int:
+	get: return enemies[0].poison
+	set(value): enemies[0].poison = value
+var enemy_burning: int:
+	get: return enemies[0].burning
+	set(value): enemies[0].burning = value
 var players: Dictionary[StringName, PlayerState] = {}
 var action_history: Array[Dictionary] = []
 var combat_log: PackedStringArray = []
 
-var _encounter: EncounterData
+var _enemies_by_id: Dictionary[StringName, EnemyState] = {}
 var _cards: Array[CardData] = []
 var _rng := RandomNumberGenerator.new()
 
@@ -51,22 +67,26 @@ var _rng := RandomNumberGenerator.new()
 func _init(encounter: EncounterData, encounter_seed: int, player_ids: Array[StringName], starting_hp := -1,
 		player_decks: Dictionary[StringName, Array] = {}, player_hps: Dictionary[StringName, int] = {}) -> void:
 	assert(not player_ids.is_empty(), "Combat requires at least one player.")
-	_encounter = encounter
 	shuffle_seed = encounter_seed
 	_rng.seed = shuffle_seed
-	enemy_hp = _encounter.enemy_max_hp
-	# Only nonnegative modifier fixtures are supported until negative-stat rules are approved.
-	enemy_strength = maxi(0, _encounter.enemy_starting_strength)
-	enemy_dexterity = maxi(0, _encounter.enemy_starting_dexterity)
+	var definitions := encounter.enemies
+	if definitions.is_empty():
+		definitions = [encounter.legacy_enemy_data()]
+	for definition: EnemyData in definitions:
+		assert(definition != null and definition.id != &"" and not _enemies_by_id.has(definition.id),
+			"Combat enemy IDs must be nonempty and unique.")
+		var enemy := EnemyState.new(definition)
+		enemies.append(enemy)
+		_enemies_by_id[enemy.id] = enemy
 	_log("Encounter started. Seed %d." % shuffle_seed)
 	for player_id in player_ids:
 		assert(not players.has(player_id), "Combat player IDs must be unique.")
 		var player := PlayerState.new()
 		player.id = player_id
-		player.max_hp = _encounter.player_max_hp
+		player.max_hp = encounter.player_max_hp
 		player.hp = player_hps.get(player_id, player.max_hp if starting_hp < 0 else starting_hp)
 		player.first_copy_id = _cards.size()
-		for card in player_decks.get(player_id, _encounter.test_deck):
+		for card in player_decks.get(player_id, encounter.test_deck):
 			player.draw_pile.append(_cards.size())
 			_cards.append(card)
 		_shuffle(player.draw_pile)
@@ -78,18 +98,12 @@ func card_data(copy_id: int) -> CardData:
 	return _cards[copy_id]
 
 
+func enemy_state(target_id: StringName) -> EnemyState:
+	return _enemies_by_id.get(target_id)
+
+
 func enemy_intent() -> Dictionary:
-	var cycle := _encounter.action_cycle
-	if not cycle.is_empty():
-		var action := cycle[(round_number - 1) % cycle.size()]
-		if action != null:
-			var bonus := enemy_strength if action.kind == EnemyAction.Kind.ATTACK else 0
-			return {"kind": int(action.kind), "amount": maxi(0, action.amount) + bonus}
-	var pattern := _encounter.enemy_attack_pattern
-	var base_damage := _encounter.enemy_attack
-	if not pattern.is_empty():
-		base_damage = maxi(0, pattern[(round_number - 1) % pattern.size()])
-	return {"kind": int(EnemyAction.Kind.ATTACK), "amount": base_damage + enemy_strength}
+	return enemies[0].intent_at(round_number - 1)
 
 
 func enemy_attack_damage() -> int:
@@ -102,8 +116,12 @@ func can_play_card(player_id: StringName, copy_id: int, target_id: StringName) -
 	if not _can_act(player) or not player.hand.has(copy_id):
 		return false
 	var card := card_data(copy_id)
-	var expected_target := _encounter.enemy_id if card.targets_enemy() else &""
-	return player.mana >= card.mana_cost and target_id == expected_target
+	if player.mana < card.mana_cost:
+		return false
+	if not card.targets_enemy():
+		return target_id == &""
+	var target := enemy_state(target_id)
+	return target != null and target.is_alive()
 
 
 func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bool:
@@ -111,6 +129,7 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 		return false
 	var player := players[player_id]
 	var card := card_data(copy_id)
+	var target := enemy_state(target_id)
 	action_history.append({&"command": &"play_card", &"player": player_id,
 		&"copy": copy_id, &"target": target_id})
 	player.mana -= card.mana_cost
@@ -119,7 +138,7 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 	for effect in card.effects:
 		match effect.kind:
 			CardEffect.Kind.DAMAGE:
-				_deal_card_damage(player, card, effect)
+				_deal_card_damage(player, target, card, effect)
 			CardEffect.Kind.GAIN_BLOCK:
 				var block_gain := effect.amount
 				if block_gain > 0:
@@ -134,7 +153,7 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 				_log("%s prepared their next Attack for +%d damage this turn." % [
 					player.id, player.next_attack_bonus])
 			CardEffect.Kind.APPLY_POISON, CardEffect.Kind.APPLY_BURNING:
-				_apply_card_status(effect)
+				_apply_card_status(target, effect)
 			CardEffect.Kind.GAIN_STRENGTH:
 				if effect.amount > 0:
 					player.strength += effect.amount
@@ -144,8 +163,7 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 					player.dexterity += effect.amount
 					_log("%s gained %d Dexterity." % [player.id, effect.amount])
 	player.discard_pile.append(copy_id)
-	if enemy_hp == 0:
-		_resolve_victory()
+	_finish_if_enemies_down()
 	return true
 
 
@@ -182,7 +200,7 @@ func end_turn(player_id: StringName) -> bool:
 	return true
 
 
-func _deal_card_damage(player: PlayerState, card: CardData, effect: CardEffect) -> void:
+func _deal_card_damage(player: PlayerState, enemy: EnemyState, card: CardData, effect: CardEffect) -> void:
 	var damage := effect.amount
 	if effect.block_per_bonus > 0:
 		@warning_ignore("integer_division")
@@ -206,25 +224,28 @@ func _deal_card_damage(player: PlayerState, card: CardData, effect: CardEffect) 
 		damage += player.next_attack_bonus
 		_log("%s used their preparation for +%d Attack damage." % [player.id, player.next_attack_bonus])
 		player.next_attack_bonus = 0
-	var absorbed := mini(enemy_block, maxi(0, damage))
+	var enemy_label := _enemy_label(enemy)
+	var absorbed := mini(enemy.block, maxi(0, damage))
 	if absorbed > 0:
-		enemy_block -= absorbed
-		_log("%s blocked %d damage." % [_encounter.enemy_name, absorbed])
-	var hp_lost := mini(enemy_hp, damage - absorbed)
-	enemy_hp -= hp_lost
-	_log("%s took %d damage." % [_encounter.enemy_name, hp_lost])
+		enemy.block -= absorbed
+		_log("%s blocked %d damage." % [enemy_label, absorbed])
+	var hp_lost := mini(enemy.hp, damage - absorbed)
+	enemy.hp -= hp_lost
+	_log("%s took %d damage." % [enemy_label, hp_lost])
+	if hp_lost > 0 and not enemy.is_alive():
+		_log_enemy_defeat(enemy_label)
 
 
-func _apply_card_status(effect: CardEffect) -> void:
-	if enemy_hp == 0 or effect.amount <= 0:
+func _apply_card_status(enemy: EnemyState, effect: CardEffect) -> void:
+	if not enemy.is_alive() or effect.amount <= 0:
 		return
 	if effect.kind == CardEffect.Kind.APPLY_POISON:
-		enemy_poison += effect.amount
-		_log_status_application(_encounter.enemy_name, effect.amount, "Poison")
+		enemy.poison += effect.amount
+		_log_status_application(_enemy_label(enemy), effect.amount, "Poison")
 	else:
 		# Provisional: repeated Burning applications add their stacks.
-		enemy_burning += effect.amount
-		_log_status_application(_encounter.enemy_name, effect.amount, "Burning")
+		enemy.burning += effect.amount
+		_log_status_application(_enemy_label(enemy), effect.amount, "Burning")
 
 
 func _take_status_damage(hp: int, stacks: int, status_name: String, target: String) -> int:
@@ -266,40 +287,52 @@ func _begin_player_phase() -> void:
 
 func _resolve_enemy_phase() -> void:
 	phase = Phase.ENEMY
-	if enemy_block > 0:
-		_log("%s lost %d remaining Block at action start." % [_encounter.enemy_name, enemy_block])
-		enemy_block = 0
-	if enemy_poison > 0:
-		enemy_hp = _take_status_damage(enemy_hp, enemy_poison, "Poison", _encounter.enemy_name)
-		enemy_poison -= 1
-		if enemy_hp == 0:
-			_resolve_victory()
+	# Provisional: finish each enemy's action and status boundaries before the next slot.
+	for enemy in enemies:
+		if not enemy.is_alive():
+			continue
+		_resolve_enemy_turn(enemy)
+		if phase == Phase.DEFEAT:
 			return
-	var intent := enemy_intent()
+	if not _finish_if_enemies_down():
+		_begin_player_phase()
+
+
+func _resolve_enemy_turn(enemy: EnemyState) -> void:
+	var enemy_label := _enemy_label(enemy)
+	if enemy.block > 0:
+		_log("%s lost %d remaining Block at action start." % [enemy_label, enemy.block])
+		enemy.block = 0
+	if enemy.poison > 0:
+		enemy.hp = _take_status_damage(enemy.hp, enemy.poison, "Poison", enemy_label)
+		enemy.poison -= 1
+		if not enemy.is_alive():
+			_log_enemy_defeat(enemy_label)
+			return
+	var intent := enemy.intent()
 	var amount: int = intent.amount
+	enemy.action_index += 1
 	match intent.kind:
 		EnemyAction.Kind.ATTACK:
-			_resolve_enemy_attack(amount)
-			# Provisional: a lethal enemy attack ends the encounter before its end-turn status tick.
+			_resolve_enemy_attack(enemy, enemy_label, amount)
+			# Provisional: a party wipe stops before Burning and the remaining enemies' turns.
 			if _finish_if_party_down():
 				return
 		EnemyAction.Kind.BLOCK:
-			enemy_block += amount
-			_log("%s gained %d Block." % [_encounter.enemy_name, amount])
+			enemy.block += amount
+			_log("%s gained %d Block." % [enemy_label, amount])
 		EnemyAction.Kind.GAIN_STRENGTH:
-			enemy_strength += amount
-			_log("%s gained %d Strength." % [_encounter.enemy_name, amount])
-	if enemy_burning > 0:
-		enemy_hp = _take_status_damage(enemy_hp, enemy_burning, "Burning", _encounter.enemy_name)
-		enemy_burning = _remaining_burning(enemy_burning)
-		if enemy_hp == 0:
-			_resolve_victory()
-			return
-	_begin_player_phase()
+			enemy.strength += amount
+			_log("%s gained %d Strength." % [enemy_label, amount])
+	if enemy.burning > 0:
+		enemy.hp = _take_status_damage(enemy.hp, enemy.burning, "Burning", enemy_label)
+		enemy.burning = _remaining_burning(enemy.burning)
+		if not enemy.is_alive():
+			_log_enemy_defeat(enemy_label)
 
 
-func _resolve_enemy_attack(attack_damage: int) -> void:
-	_log("%s attacks for %d damage." % [_encounter.enemy_name, attack_damage])
+func _resolve_enemy_attack(enemy: EnemyState, enemy_label: String, attack_damage: int) -> void:
+	_log("%s attacks for %d damage." % [enemy_label, attack_damage])
 	for player: PlayerState in players.values():
 		if player.hp <= 0:
 			continue
@@ -311,16 +344,32 @@ func _resolve_enemy_attack(attack_damage: int) -> void:
 		if player.hp == 0:
 			_log("%s was defeated." % player.id)
 			continue
-		_apply_attack_statuses(player)
+		_apply_attack_statuses(enemy, player)
 
 
-func _apply_attack_statuses(player: PlayerState) -> void:
-	if _encounter.enemy_poison_per_attack > 0:
-		player.poison += _encounter.enemy_poison_per_attack
-		_log_status_application(player.id, _encounter.enemy_poison_per_attack, "Poison")
-	if _encounter.enemy_burning_per_attack > 0:
-		player.burning += _encounter.enemy_burning_per_attack
-		_log_status_application(player.id, _encounter.enemy_burning_per_attack, "Burning")
+func _apply_attack_statuses(enemy: EnemyState, player: PlayerState) -> void:
+	if enemy.poison_per_attack > 0:
+		player.poison += enemy.poison_per_attack
+		_log_status_application(player.id, enemy.poison_per_attack, "Poison")
+	if enemy.burning_per_attack > 0:
+		player.burning += enemy.burning_per_attack
+		_log_status_application(player.id, enemy.burning_per_attack, "Burning")
+
+
+func _enemy_label(enemy: EnemyState) -> String:
+	var same_name_count := 0
+	var name_number := 0
+	for other in enemies:
+		if other.display_name == enemy.display_name:
+			same_name_count += 1
+			if other == enemy:
+				name_number = same_name_count
+	return "%s (%d)" % [enemy.display_name, name_number] if same_name_count > 1 else enemy.display_name
+
+
+func _log_enemy_defeat(enemy_label: String) -> void:
+	if enemies.size() > 1:
+		_log("%s was defeated." % enemy_label)
 
 
 func _log_status_application(target: String, amount: int, status_name: String) -> void:
@@ -336,15 +385,22 @@ func _finish_if_party_down() -> bool:
 	return true
 
 
-func _resolve_victory() -> void:
+func _finish_if_enemies_down() -> bool:
+	for enemy in enemies:
+		if enemy.is_alive():
+			return false
 	phase = Phase.VICTORY
-	_log("Victory. %s was defeated." % _encounter.enemy_name)
+	if enemies.size() == 1:
+		_log("Victory. %s was defeated." % enemies[0].display_name)
+	else:
+		_log("Victory. All enemies were defeated.")
 	for player: PlayerState in players.values():
 		if player.hp == 0:
 			@warning_ignore("integer_division")
 			player.hp = player.max_hp / 4 + int(player.max_hp % 4 != 0)
 			player.recovered_after_victory = true
 			_log("%s recovered to %d/%d HP after victory." % [player.id, player.hp, player.max_hp])
+	return true
 
 
 func _draw(player: PlayerState, count: int) -> void:
