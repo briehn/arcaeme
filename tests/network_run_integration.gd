@@ -4,6 +4,7 @@ const Authority = preload("res://scripts/network/network_combat_authority.gd")
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const NetworkSession = preload("res://scripts/network/network_coop_session.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
+const PacingExperiment = preload("res://scripts/run/pacing_experiment.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const CardData = preload("res://scripts/combat/card_data.gd")
 const DATA = preload("res://resources/prototype/battle_mage_run.tres")
@@ -20,6 +21,8 @@ const NETWORK := "res://scenes/network_coop.tscn"
 var _session: NetworkSession
 var _scenario: String
 var _enemy_variety := false
+var _variety_data: RunData = VARIETY
+var _pacing := PacingExperiment.VariantKind.BASELINE
 var _size: int
 var _seat: int
 var _actor: String
@@ -63,6 +66,15 @@ func _start() -> void:
 	_scenario = args[0]
 	_enemy_variety = _scenario.begins_with("enemy-variety-")
 	_size = int(args[2])
+	match _scenario:
+		"enemy-variety-timing":
+			_pacing = PacingExperiment.VariantKind.TIMING
+		"enemy-variety-durability":
+			_pacing = PacingExperiment.VariantKind.DURABILITY
+		"enemy-variety-combined":
+			_pacing = PacingExperiment.VariantKind.COMBINED
+	if _enemy_variety:
+		_variety_data = PacingExperiment.make_run(VARIETY, _pacing, _size)
 	_seat = int(args[3])
 	_actor = "Battle Mage %d" % _seat
 	_barrier = args[4]
@@ -102,6 +114,12 @@ func _start() -> void:
 			if _session.run_data != VARIETY or (_control("%HostButton") as Button).text != "Host Enemy Variety Run":
 				_fail("The lobby did not select the actual enemy variety fixture.")
 				return
+			var pacing: OptionButton = current_scene.get_node("%PacingVariant")
+			var option := pacing.get_item_index(_pacing)
+			if not pacing.is_visible_in_tree() or pacing.disabled or option < 0:
+				_fail("The pacing experiment is unavailable in the host lobby.")
+				return
+			pacing.select(option)
 	var launch: Button = current_scene.get_node("%HostButton" if _seat == 1 else "%JoinButton")
 	launch.pressed.emit()
 	while not _finished:
@@ -220,11 +238,11 @@ func _check_private_view(view: Dictionary) -> bool:
 
 
 func _check_variety_view(view: Dictionary) -> bool:
-	var encounter: EncounterData = VARIETY.opening_encounters[0] if view.encounter_id == 1 else VARIETY.boss_encounter
+	var encounter: EncounterData = _variety_data.opening_encounters[0] if view.encounter_id == 1 else _variety_data.boss_encounter
 	var pattern := encounter.enemy_attack_pattern
 	var expected_attack := pattern[(int(view.round) - 1) % pattern.size()]
 	var stage_label: Label = _control("%RunStage")
-	if (view.get("run_title") != VARIETY.title or VARIETY.title not in stage_label.text
+	if (view.get("run_title") != _variety_data.title or _variety_data.title not in stage_label.text
 			or view.enemy_name != encounter.enemy_name or view.enemy_attack != expected_attack):
 		_fail("The alternative route title, enemy, or advertised intent did not survive the host snapshot.")
 		return false
@@ -263,7 +281,7 @@ func _check_variety_view(view: Dictionary) -> bool:
 
 
 func _check_opening(view: Dictionary) -> bool:
-	var opening: EncounterData = VARIETY.opening_encounters[0] if _enemy_variety else DATA.opening_encounters[0]
+	var opening: EncounterData = _variety_data.opening_encounters[0] if _enemy_variety else DATA.opening_encounters[0]
 	var enemy_hp := 6 if _scenario == "mixed" else opening.enemy_max_hp
 	if view.encounter_id != 1 or view.revision != 0 or view.run_revision != 0 or view.round != 1 or \
 			view.enemy_name != opening.enemy_name or view.enemy_hp != enemy_hp or \
@@ -501,7 +519,7 @@ func _drive_boss(view: Dictionary) -> void:
 
 
 func _check_boss_start(view: Dictionary) -> bool:
-	var run: RunData = VARIETY if _enemy_variety else DATA
+	var run: RunData = _variety_data if _enemy_variety else DATA
 	var enemy_hp := 6 if _scenario == "mixed" else run.boss_encounter.enemy_max_hp
 	var expected_deck_size := _deck_size + int(not _chosen_reward.is_empty())
 	var stage_label: Label = current_scene.get_node("%RunStage")

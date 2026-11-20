@@ -5,3 +5,4 @@
 
 [node name="EnemyVarietyRun" instance=ExtResource("1_run")]
 run_data = ExtResource("2_run_data")
+enable_pacing_variants = true

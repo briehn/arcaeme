@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)] [string]$Godot,
     [ValidateRange(1024, 65530)] [int]$BasePort = 26800,
     [ValidateSet('take', 'skip', 'mixed', 'lobby-disconnect', 'reward-disconnect',
-        'enemy-variety-2', 'enemy-variety-3', 'enemy-variety-4')]
+        'enemy-variety-2', 'enemy-variety-3', 'enemy-variety-4',
+        'enemy-variety-timing', 'enemy-variety-durability', 'enemy-variety-combined')]
     [string[]]$Scenarios = @('take', 'skip', 'mixed', 'lobby-disconnect', 'reward-disconnect'),
     [switch]$Native
 )
@@ -65,7 +66,8 @@ function Release-Barrier([string]$Barrier, [string]$Name) {
 
 function Test-Scenario([string]$Scenario, [int]$Port) {
     $sizes = @{ take = 2; skip = 3; mixed = 4; 'lobby-disconnect' = 3; 'reward-disconnect' = 3;
-        'enemy-variety-2' = 2; 'enemy-variety-3' = 3; 'enemy-variety-4' = 4 }
+        'enemy-variety-2' = 2; 'enemy-variety-3' = 3; 'enemy-variety-4' = 4;
+        'enemy-variety-timing' = 3; 'enemy-variety-durability' = 4; 'enemy-variety-combined' = 4 }
     $size = $sizes[$Scenario]
     $lastSeat = if ($Scenario -eq 'lobby-disconnect') { $size - 1 } else { $size }
     $barrier = Join-Path $logFolder "$Port-$Scenario"

@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" path="res://scripts/prototype_run.gd" id="1_run"]
 [ext_resource type="Resource" path="res://resources/prototype/battle_mage_run.tres" id="2_run_data"]
+[ext_resource type="Script" path="res://scripts/ui/pacing_variant_picker.gd" id="3_pacing_picker"]
 
 [node name="PrototypeRun" type="Control"]
 layout_mode = 3
@@ -67,6 +68,22 @@ theme_override_constants/separation = 10
 unique_name_in_owner = true
 layout_mode = 2
 autowrap_mode = 3
+
+[node name="PacingControls" type="HBoxContainer" parent="RunPanel/Layout/Body/Selection"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="PacingLabel" type="Label" parent="RunPanel/Layout/Body/Selection/PacingControls"]
+layout_mode = 2
+text = "Pacing (Prototype)"
+
+[node name="PacingVariant" type="OptionButton" parent="RunPanel/Layout/Body/Selection/PacingControls"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+script = ExtResource("3_pacing_picker")
+solo_setup = true
 
 [node name="ChoiceScroll" type="ScrollContainer" parent="RunPanel/Layout/Body/Selection"]
 layout_mode = 2

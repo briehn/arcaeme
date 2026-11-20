@@ -5,6 +5,8 @@ const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
 const NetworkSession = preload("res://scripts/network/network_coop_session.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
 const EnemyPlaytestSelector = preload("res://scripts/ui/enemy_playtest_selector.gd")
+const PacingExperiment = preload("res://scripts/run/pacing_experiment.gd")
+const PacingVariantPicker = preload("res://scripts/ui/pacing_variant_picker.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 const STATUS_ENCOUNTER = preload("res://resources/prototype/status_playtest/encounter.tres")
 const MODIFIER_ENCOUNTER = preload("res://resources/prototype/modifier_playtest/encounter.tres")
@@ -16,6 +18,8 @@ const ENEMY_VARIETY_RUN = preload("res://resources/prototype/enemy_variety_run.t
 @onready var party_size_field: OptionButton = %PartySize
 @onready var short_run_field: CheckBox = %ShortRun
 @onready var enemy_variety_run_field: CheckBox = %EnemyVarietyRun
+@onready var pacing_controls: HBoxContainer = %PacingControls
+@onready var pacing_variant_field: PacingVariantPicker = %PacingVariant
 @onready var status_playtest_field: CheckBox = %StatusPlaytest
 @onready var modifier_playtest_field: CheckBox = %ModifierPlaytest
 @onready var enemy_playtest_field: EnemyPlaytestSelector = %EnemyPlaytest
@@ -67,6 +71,7 @@ func _refresh() -> void:
 	party_size_field.disabled = connected_or_waiting
 	short_run_field.disabled = connected_or_waiting
 	enemy_variety_run_field.disabled = connected_or_waiting or not short_run_field.button_pressed
+	pacing_variant_field.disabled = connected_or_waiting or not enemy_variety_run_field.button_pressed
 	status_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
 	modifier_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
 	enemy_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
@@ -175,6 +180,10 @@ func _on_short_run_toggled(enabled: bool) -> void:
 
 func _on_enemy_variety_run_toggled(enabled: bool) -> void:
 	session.run_data = ENEMY_VARIETY_RUN if enabled else default_run_data
+	pacing_controls.visible = enabled
+	pacing_variant_field.disabled = not enabled
+	if not enabled:
+		pacing_variant_field.select(pacing_variant_field.get_item_index(PacingExperiment.VariantKind.BASELINE))
 	_refresh_host_button_text()
 
 
@@ -219,7 +228,12 @@ func _select_encounter_fixture() -> void:
 
 
 func _on_host_pressed() -> void:
-	session.host(int(port_field.value), party_size_field.get_selected_id(), short_run_field.button_pressed)
+	var party_size := party_size_field.get_selected_id()
+	if enemy_variety_run_field.button_pressed:
+		var variant := pacing_variant_field.selected_variant()
+		session.run_data = ENEMY_VARIETY_RUN if variant == PacingExperiment.VariantKind.BASELINE \
+			else PacingExperiment.make_run(ENEMY_VARIETY_RUN, variant, party_size)
+	session.host(int(port_field.value), party_size, short_run_field.button_pressed)
 
 
 func _on_join_pressed() -> void:

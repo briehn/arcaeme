@@ -4,12 +4,15 @@ const CardData = preload("res://scripts/combat/card_data.gd")
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const CombatView = preload("res://scripts/combat.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
+const PacingExperiment = preload("res://scripts/run/pacing_experiment.gd")
+const PacingVariantPicker = preload("res://scripts/ui/pacing_variant_picker.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const RunState = preload("res://scripts/run/run_state.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 
 @export var run_data: RunData
+@export var enable_pacing_variants := false
 
 @onready var run_panel: MarginContainer = %RunPanel
 @onready var heading: Label = %Heading
@@ -19,6 +22,9 @@ const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 @onready var deck_title: Label = %DeckTitle
 @onready var deck_list: RichTextLabel = %DeckList
 @onready var back_button: Button = %RunBackButton
+@onready var pacing_controls: HBoxContainer = %PacingControls
+@onready var pacing_variant_field: PacingVariantPicker = %PacingVariant
+@onready var _pacing_template := run_data
 
 var _run: RunState
 var _combat_view: CombatView
@@ -26,15 +32,17 @@ var _combat_view: CombatView
 
 func _ready() -> void:
 	_run = RunState.new(run_data)
+	pacing_variant_field.item_selected.connect(_on_pacing_variant_selected)
 	if not run_data.title.is_empty():
 		$RunPanel/Layout/Title.text = run_data.title
 	_render_panel()
 
 
-func _render_panel() -> void:
+func _render_panel(focus_choice := true) -> void:
 	for choice in choices.get_children():
 		choices.remove_child(choice)
 		choice.queue_free()
+	pacing_controls.visible = enable_pacing_variants and _run.stage == RunState.Stage.ROUTE
 	message.text = ""
 	match _run.stage:
 		RunState.Stage.ROUTE:
@@ -65,8 +73,19 @@ func _render_panel() -> void:
 	run_status.text = "Battle Mage  ·  HP %d/%d  ·  Run seed %d" % [_run.current_hp, _run.max_hp, _run.run_seed]
 	_render_deck(_run.deck_cards())
 	run_panel.show()
-	var focus_target: Button = choices.get_child(0) if choices.get_child_count() > 0 else back_button
-	focus_target.grab_focus()
+	if focus_choice:
+		var focus_target: Button = choices.get_child(0) if choices.get_child_count() > 0 else back_button
+		focus_target.grab_focus()
+
+
+func _on_pacing_variant_selected(_index: int) -> void:
+	if not enable_pacing_variants or _run.stage != RunState.Stage.ROUTE:
+		return
+	var variant := pacing_variant_field.selected_variant()
+	run_data = _pacing_template if variant == PacingExperiment.VariantKind.BASELINE \
+		else PacingExperiment.make_run(_pacing_template, variant, 1)
+	_run = RunState.new(run_data)
+	_render_panel(false)
 
 
 func _encounter_preview(encounter: EncounterData) -> String:
