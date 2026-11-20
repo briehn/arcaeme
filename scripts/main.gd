@@ -20,6 +20,42 @@ var _enemy_local_coop_button: Button
 
 func _ready() -> void:
 	enemy_playtest.item_selected.connect(_on_enemy_playtest_selected)
+	resized.connect(_fit_logo_area)
+	_fit_logo_area()
+	var unchecked := _checkbox_marker(false)
+	var checked := _checkbox_marker(true)
+	for toggle: CheckBox in [major_arcana, card_expansion]:
+		toggle.add_theme_icon_override(&"unchecked", unchecked)
+		toggle.add_theme_icon_override(&"checked", checked)
+
+
+func _fit_logo_area() -> void:
+	# Leave the full primary stack visible at the smallest supported height.
+	%LogoArea.custom_minimum_size.y = clampf(size.y * 0.27, 134.0, 172.0)
+
+
+func _checkbox_marker(checked: bool) -> Texture2D:
+	var image := Image.create_empty(16, 16, false, Image.FORMAT_RGBA8)
+	image.fill_rect(Rect2i(1, 1, 14, 14), Color("#caafd4"))
+	image.fill_rect(Rect2i(3, 3, 10, 10), Color("#20152e"))
+	if checked:
+		image.fill_rect(Rect2i(4, 4, 8, 8), Color("#f6d087"))
+	return ImageTexture.create_from_image(image)
+
+
+func _show_prototype_tools(show_tools: bool) -> void:
+	%PrimaryNavigation.visible = not show_tools
+	%PrototypeNavigation.visible = show_tools
+	%BackFromTools.visible = show_tools
+	%MenuScroll.scroll_vertical = 0
+	var focus_target: Button = %BackFromTools if show_tools else %OpenPrototypeTools
+	focus_target.grab_focus()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if %PrototypeNavigation.visible and event.is_action_pressed(&"ui_cancel"):
+		_show_prototype_tools(false)
+		get_viewport().set_input_as_handled()
 
 
 func _on_button_pressed() -> void:
@@ -86,6 +122,7 @@ func _on_enemy_playtest_selected(_index: int) -> void:
 			_enemy_local_coop_button = Button.new()
 			_enemy_local_coop_button.name = "StartEnemyLocalCoopButton"
 			_enemy_local_coop_button.text = "Start Local Co-op"
+			_enemy_local_coop_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 			_enemy_local_coop_button.pressed.connect(_on_start_enemy_local_coop_pressed)
 			enemy_playtest.get_parent().add_child(_enemy_local_coop_button)
 			_enemy_local_coop_button.owner = self

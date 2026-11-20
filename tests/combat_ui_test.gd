@@ -2,7 +2,7 @@ extends SceneTree
 
 const MENU_PATH := "res://scenes/main.tscn"
 const COMBAT_PATH := "res://scenes/combat.tscn"
-const START_BUTTON := "CenterContainer/VBoxContainer/Button"
+const START_BUTTON := "%StartCombatButton"
 
 var _checks := 0
 var _failures := 0

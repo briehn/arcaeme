@@ -61,8 +61,43 @@ func _run() -> void:
 
 func _test_menu() -> void:
 	var menu := await _open(MAIN)
-	for button in menu.find_children("*", "Button", true, false):
+	var logo := _control(menu, "%LogoDisplay") as TextureRect
+	_check_control(logo, "main menu")
+	_check(logo.texture != null and logo.texture.get_size() == Vector2(3000, 1200)
+		and logo.get_global_rect().end.x < _size.x * 0.55, "source logo fits the left side")
+	var primary := _control(menu, "%PrimaryNavigation")
+	for button in primary.get_children():
 		_check_control(button, "main menu")
+	_check(logo.get_global_rect().end.y < primary.get_global_rect().position.y, "navigation starts below the logo")
+	var start := _control(menu, "%StartCombatButton") as Button
+	_check(start.get_theme_stylebox("normal") != start.get_theme_stylebox("hover")
+		and start.get_theme_stylebox("normal") != start.get_theme_stylebox("pressed")
+		and start.get_theme_stylebox("focus") != null, "main action has distinct feedback states")
+	var open_tools := _control(menu, "%OpenPrototypeTools")
+	_click(open_tools)
+	await _settle()
+	var back := _control(menu, "%BackFromTools")
+	var tools := _control(menu, "%PrototypeNavigation")
+	_check(not primary.visible and tools.visible and back.has_focus(), "prototype tools open with a focused return action")
+	for path in ["%StartRunButton", "%StartEnemyVarietyRunButton", "%StartLocalCoopButton",
+			"%StartStatusPlaytestButton", "%StartModifierPlaytestButton", "%CardExpansion",
+			"%EnemyPlaytest", "%StartEnemyPlaytestButton"]:
+		var control := _control(menu, path)
+		_check(await _reach(control), "%s is reachable in prototype tools" % control.name)
+	var picker := _control(menu, "%EnemyPlaytest") as OptionButton
+	for index in picker.item_count:
+		if picker.get_item_text(index).begins_with("Two Slimes"):
+			picker.select(index)
+			picker.item_selected.emit(index)
+			break
+	await _settle()
+	var local_fixture := menu.get_node_or_null("%StartEnemyLocalCoopButton") as Button
+	_check(local_fixture != null and await _reach(local_fixture), "tactical local co-op appears and is reachable")
+	_check_control(back, "prototype tools after scrolling")
+	_click(back)
+	await _settle()
+	_check(primary.visible and not tools.visible and open_tools.has_focus() and _fully_visible(open_tools),
+		"return restores focus and the primary navigation position")
 	await _close(menu)
 
 

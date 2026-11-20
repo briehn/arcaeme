@@ -76,7 +76,7 @@ func _run() -> void:
 	_check(_text("%Heading") == "Run Defeat" and "Gate Sentinel" in _text("%Message") and
 		current_scene.get_node("%Choices").get_child_count() == 0, "opening defeat skips the reward and boss")
 	await _return_to_menu()
-	var standalone: Button = current_scene.get_node("CenterContainer/VBoxContainer/Button")
+	var standalone: Button = current_scene.get_node("%StartCombatButton")
 	_check(standalone.text == "Start Combat", "the menu still offers the independent combat playtest")
 	print("Run UI: %d checks, %d failures." % [_checks, _failures])
 	quit(1 if _failures > 0 else 0)
