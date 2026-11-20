@@ -59,4 +59,7 @@ static func build(state: CombatState, encounter: EncounterData, viewer: StringNa
 	}
 	if show_seed:
 		snapshot["seed"] = state.shuffle_seed
+	var arcana := state.arcana_view(viewer)
+	if not arcana.is_empty():
+		snapshot["arcana"] = arcana
 	return snapshot

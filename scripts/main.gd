@@ -13,6 +13,7 @@ const LOCAL_COOP_SCENE = preload("res://scenes/local_coop.tscn")
 
 @onready var enemy_playtest: EnemyPlaytestSelector = %EnemyPlaytest
 @onready var card_expansion: CheckBox = %CardExpansion
+@onready var major_arcana: CheckBox = %MajorArcana
 
 var _enemy_local_coop_button: Button
 
@@ -39,6 +40,9 @@ func _on_start_enemy_variety_run_pressed() -> void:
 func _start_multi_enemy_run(local_coop: bool) -> void:
 	var run: PrototypeRunView = PROTOTYPE_RUN_SCENE.instantiate()
 	run.run_data = MULTI_ENEMY_RUN
+	if major_arcana.button_pressed:
+		run.run_data = MULTI_ENEMY_RUN.duplicate()
+		run.run_data.major_arcana_enabled = true
 	run.local_coop = local_coop
 	get_tree().change_scene_to_node(run)
 

@@ -1,6 +1,7 @@
 extends SceneTree
 
 const CombatState = preload("res://scripts/combat/combat_state.gd")
+const MajorArcana = preload("res://scripts/run/major_arcana.gd")
 const NetworkSession = preload("res://scripts/network/network_coop_session.gd")
 const ViewSnapshot = preload("res://scripts/combat/combat_view_snapshot.gd")
 const MAIN = preload("res://scenes/main.tscn")
@@ -47,6 +48,8 @@ func _run() -> void:
 		await _test_solo_run()
 		await _test_multi_enemy_run(false)
 		await _test_multi_enemy_run(true)
+		await _test_arcana_run(false)
+		await _test_arcana_run(true)
 		await _test_network()
 		_viewport.queue_free()
 		await process_frame
@@ -160,6 +163,49 @@ func _check_run_encounter(run: Control, progress: String, encounter: String) -> 
 	_check(progress in title.text and encounter in title.text, "run combat shows " + progress + " and " + encounter)
 	_check(await _reach(title), "multi-enemy run combat title is fully readable")
 	_check_control(_control(combat, "%EndTurnButton"), "multi-enemy run combat")
+
+
+func _test_arcana_run(local_coop: bool) -> void:
+	var run := RUN.instantiate() as Control
+	run.run_data = MULTI_ENEMY_RUN.duplicate()
+	run.run_data.major_arcana_enabled = true
+	run.local_coop = local_coop
+	_viewport.add_child(run)
+	await _settle()
+	var choices := _control(run, "%Choices")
+	_check(not run.has_node("Combat") and (_control(run, "%Heading") as Label).text == "Choose a Major Arcana",
+		"Arcana choice precedes the first fight")
+	if local_coop:
+		_check(choices.get_child_count() == 1 and choices.get_child(0).text == "Show Battle Mage 1 Arcana",
+			"local first Mage must reveal offers")
+		await _act_on(choices.get_child(0) as Button, "Mage 1 Arcana reveal")
+	_check(choices.get_child_count() == 4 and choices.get_child(3).text == "Skip Arcana",
+		"three Arcana choices and a skip button are present")
+	for choice: Button in choices.get_children():
+		_check(await _reach(choice), "Arcana choice and text are reachable")
+		_check_button_text(choice, "Arcana choice")
+	var selected: String = choices.get_child(0).text.get_slice("\n", 0)
+	await _act_on(choices.get_child(0) as Button, "choose a Major Arcana")
+	if local_coop:
+		_check(not run.has_node("Combat") and choices.get_child_count() == 1
+			and choices.get_child(0).text == "Show Battle Mage 2 Arcana",
+			"local handoff hides offers and waits for the second Mage")
+		await _act_on(choices.get_child(0) as Button, "Mage 2 Arcana reveal")
+		await _act_on(choices.get_child(3) as Button, "Mage 2 Arcana skip")
+	else:
+		await _act_on(choices.get_child(0) as Button, "Arcana solo opening")
+	var combat := run.get_node("Combat") as Control
+	var arcana := _control(combat, "%ArcanaLabel") as Label
+	var arcana_readable := await _reach(arcana)
+	_check(selected in arcana.text and not arcana.tooltip_text.is_empty() and arcana_readable,
+		"the selected Arcana and its tooltip are available in combat")
+	_check_control(_control(combat, "%EndTurnButton"), "Arcana combat")
+	if local_coop:
+		var seat := _control(combat, "%PlayerSelector").get_child(1) as Button
+		await _act_on(seat, "switch Arcana combat viewer")
+		_check(not arcana.visible and arcana.text.is_empty() and arcana.tooltip_text.is_empty(),
+			"the Mage who skipped sees no other Mage's Arcana UI")
+	await _close(run)
 
 
 func _finish_displayed_fight(run: Control) -> void:
@@ -296,9 +342,14 @@ func _test_network() -> void:
 	_check(multi_enemy.button_pressed and not variety.button_pressed and session.run_data == MULTI_ENEMY_RUN
 		and (_control(scene, "%HostButton") as Button).text == "Host Multi-Enemy Short Run",
 		"network route selection is explicit and deselects Enemy Variety")
+	var arcana_option := _control(scene, "%MajorArcana") as CheckBox
+	_check(arcana_option.visible and not arcana_option.disabled and not arcana_option.button_pressed,
+		"network Arcana choice is an opt-in on the multi-enemy route")
+	await _act_on(arcana_option, "network Major Arcana toggle")
 	await _act_on(variety, "network switch back to Enemy Variety")
 	_check(not multi_enemy.button_pressed and variety.button_pressed and session.run_data != MULTI_ENEMY_RUN,
 		"switching back to Enemy Variety clears the multi-enemy route")
+	_check(not arcana_option.visible and not arcana_option.button_pressed, "switching routes clears Arcana opt-in")
 
 	var combat := _control(scene, "%CombatSlot").get_node("Combat") as Control
 	session.party_size = 4
@@ -306,6 +357,30 @@ func _test_network() -> void:
 	session.connected_players = PackedStringArray(NAMES)
 	session.message = "Host · Battle Mage 1 · Connected"
 	session.status = NetworkSession.Status.ACTIVE
+	var options: Array[Dictionary] = []
+	for id in MajorArcana.offers(MULTI_ENEMY_RUN.run_seed, 0, &"battle_mage"):
+		options.append(MajorArcana.view(id))
+	session.snapshot = {
+		"viewer": String(NAMES[0]), "run_stage": "arcana", "encounter_id": 0, "encounter_count": 3,
+		"run_title": MULTI_ENEMY_RUN.title, "arcana_ready": 0, "arcana_submitted": false, "arcana_options": options,
+	}
+	session.changed.emit()
+	await _settle()
+	_check(not combat.is_visible_in_tree() and _control(scene, "%RewardChoices").get_child_count() == 3,
+		"opening network Arcana offers display before combat exists")
+	var skip := _control(scene, "%SkipReward") as Button
+	_check(skip.text == "Skip Arcana", "the fixed button skips Arcana during selection")
+	_check_control(skip, "network Arcana skip")
+	for choice: Button in _control(scene, "%RewardChoices").get_children():
+		_check(await _reach(choice), "network Arcana choice is reachable")
+		_check_button_text(choice, "network Arcana choice")
+	session.snapshot.arcana_submitted = true
+	session.snapshot.arcana_options = []
+	session.snapshot.arcana_ready = 1
+	session.changed.emit()
+	await _settle()
+	_check(not skip.visible and _control(scene, "%RewardChoices").get_child_count() == 0,
+		"submitted network offers stay hidden while the party finishes")
 	var state := CombatState.new(ENCOUNTER, ENCOUNTER.shuffle_seed, NAMES)
 	state.enemy_poison = 7
 	state.enemy_burning = 3

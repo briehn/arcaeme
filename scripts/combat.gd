@@ -23,6 +23,7 @@ signal network_undo_ready_requested
 @onready var target_label: Label = %TargetLabel
 @onready var enemy_targets: HFlowContainer = %EnemyTargets
 @onready var cards_label: Label = %CardsLabel
+@onready var arcana_label: Label = %ArcanaLabel
 @onready var player_selector: HFlowContainer = %PlayerSelector
 @onready var hand_cards: HFlowContainer = %HandCards
 @onready var combat_log: RichTextLabel = %CombatLog
@@ -70,6 +71,9 @@ func clear_network_view() -> void:
 	_input_allowed = false
 	_pending_card_copy = -1
 	cancel_target_button.hide()
+	arcana_label.hide()
+	arcana_label.text = ""
+	arcana_label.tooltip_text = ""
 	_living_enemy_ids.clear()
 	_clear_enemy_buttons()
 	_render_hand([], false)
@@ -131,6 +135,16 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 		hand.size(), snapshot["draw_count"], snapshot["discard_count"]]
 	if snapshot.has("seed"):
 		cards_label.text += "   ·   Seed %d" % snapshot["seed"]
+	var arcana: Dictionary = snapshot.get("arcana", {})
+	arcana_label.visible = not arcana.is_empty()
+	arcana_label.text = ""
+	arcana_label.tooltip_text = ""
+	if not arcana.is_empty():
+		arcana_label.text = "Major Arcana: " + String(arcana.name)
+		var progress := String(arcana.get("progress", ""))
+		if not progress.is_empty():
+			arcana_label.text += "  ·  " + progress
+		arcana_label.tooltip_text = arcana.description
 	var continue_run := not in_combat and not _run_title.is_empty()
 	var can_undo: bool = snapshot.get("can_undo_ready", false)
 	end_turn_button.text = "Undo Ready" if can_undo else "End Turn"

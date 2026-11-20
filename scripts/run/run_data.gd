@@ -14,6 +14,7 @@ const BATTLE_MAGE := &"battle_mage"
 @export var intermediate_encounters: Array[EncounterData] = []
 @export var boss_encounter: EncounterData
 @export var reward_candidates: Array[CardData] = []
+@export var major_arcana_enabled := false
 
 
 func encounter_count() -> int:

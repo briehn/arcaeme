@@ -29,6 +29,11 @@ var _probed_target := false
 var _probed_old_reward := false
 var _sent_before: Dictionary
 var _sent_target := ""
+var _with_arcana := false
+var _arcana_choice := ""
+var _arcana_ready_seen: Array[int] = []
+var _arcana_probes := 0
+var _probed_old_arcana := false
 
 
 func _initialize() -> void:
@@ -37,9 +42,10 @@ func _initialize() -> void:
 
 func _start() -> void:
 	var args := OS.get_cmdline_user_args()
-	if args.size() != 4:
-		_fail("Expected UDP port, party size, seat and release path.")
+	if args.size() != 4 and (args.size() != 5 or args[4] != "MajorArcana"):
+		_fail("Expected UDP port, party size, seat, release path and optional MajorArcana.")
 		return
+	_with_arcana = args.size() == 5
 	_size = int(args[1])
 	_seat = int(args[2])
 	_actor = "Battle Mage %d" % _seat
@@ -66,6 +72,12 @@ func _start() -> void:
 			return
 		(current_scene.get_node("%ShortRun") as CheckBox).button_pressed = true
 		route.button_pressed = true
+		if _with_arcana:
+			var arcana: CheckBox = current_scene.get_node("%MajorArcana")
+			if arcana.button_pressed or arcana.disabled or not arcana.is_visible_in_tree():
+				_fail("Major Arcana must be selectable and opt-in for the multi-enemy route.")
+				return
+			arcana.button_pressed = true
 		if (current_scene.get_node("%HostButton") as Button).text != "Host Multi-Enemy Short Run":
 			_fail("The lobby did not identify the selected run.")
 			return
@@ -98,20 +110,24 @@ func _observe() -> void:
 			[revision, _actor, view.run_stage, view.encounter_id])
 		return
 	_public_digests.append(JSON.stringify({
-		"players": view.players, "enemies": view.enemies, "log": view.log, "round": view.round,
-		"phase": view.phase, "stage": view.run_stage, "encounter": view.encounter_id,
+		"players": view.get("players"), "enemies": view.get("enemies"), "log": view.get("log"), "round": view.get("round"),
+		"phase": view.get("phase"), "stage": view.run_stage, "encounter": view.encounter_id,
 		"revision": view.revision, "ready": view.get("reward_ready"),
 		"next_encounter": view.get("next_encounter_name"),
+		"arcana_ready": view.get("arcana_ready"),
 	}).sha256_text())
 	if view.run_stage in ["victory", "defeat"]:
 		_report(view)
 
 
 func _verify(view: Dictionary) -> bool:
+	if view.run_stage == "arcana":
+		return _verify_arcana_selection(view)
 	var encounter: int = view.encounter_id
 	if (encounter < 1 or encounter > 3 or view.encounter_count != 3 or view.run_title != RUN.title
 			or view.viewer != _actor or view.players.size() != _size or view.has("seed")
-			or view.has("reward_offers_by_player") or view.run_deck_count != _deck.size()):
+			or view.has("reward_offers_by_player") or view.run_deck_count != _deck.size()
+			or view.has("arcana_options") or view.get("arcana", {}).get("id", "") != _arcana_choice):
 		return false
 	var stage_label: Label = current_scene.get_node("%RunStage")
 	if ("Encounter %d of 3" % encounter not in stage_label.text
@@ -127,7 +143,8 @@ func _verify(view: Dictionary) -> bool:
 			return false
 		living += int(enemy.alive)
 	for player in view.players:
-		if player.has("hand") or player.has("deck") or player.has("reward_options") or player.has("ready_epoch"):
+		if (player.has("hand") or player.has("deck") or player.has("reward_options")
+				or player.has("ready_epoch") or player.has("arcana") or player.has("arcana_options")):
 			return false
 	for card in view.hand:
 		if card.copy < 0 or card.copy >= _deck.size() or card.id != _deck[card.copy]:
@@ -153,6 +170,35 @@ func _verify(view: Dictionary) -> bool:
 	return true
 
 
+func _verify_arcana_selection(view: Dictionary) -> bool:
+	if (not _with_arcana or view.viewer != _actor or view.encounter_id != 0 or view.revision != 0
+			or view.has("players") or view.has("enemies") or view.has("hand") or view.has("reward_options")
+			or view.has("seed") or view.has("arcana_offers_by_player")
+			or view.arcana_ready != _arcana_ready_seen.size() or not _started.is_empty()):
+		return false
+	_arcana_ready_seen.append(view.arcana_ready)
+	var heading: Label = current_scene.get_node("%RunStage")
+	var choices := current_scene.get_node("%RewardChoices")
+	var skip: Button = current_scene.get_node("%SkipReward")
+	if ("Choose a Major Arcana" not in heading.text or (current_scene.get_node("%CombatSlot") as Control).visible
+			or choices.get_child_count() != view.arcana_options.size()):
+		return false
+	if view.arcana_submitted:
+		return view.arcana_options.is_empty() and not skip.visible
+	if view.arcana_options.size() != 3 or not skip.visible or skip.text != "Skip Arcana":
+		return false
+	var offer_ids: Array[String] = []
+	for index in view.arcana_options.size():
+		var offer: Dictionary = view.arcana_options[index]
+		if offer.id in offer_ids or offer.name.is_empty() or offer.description.is_empty():
+			return false
+		offer_ids.append(offer.id)
+		var button: Button = choices.get_child(index)
+		if offer.name not in button.text or offer.description not in button.text:
+			return false
+	return true
+
+
 func _verify_start(view: Dictionary) -> bool:
 	var encounter: int = view.encounter_id
 	var stage: String = ["opening", "intermediate", "boss"][encounter - 1]
@@ -170,6 +216,10 @@ func _verify_start(view: Dictionary) -> bool:
 			return false
 	if encounter == 1:
 		_opening_hand = _copies(view)
+	var arcana_label: Label = _combat().get_node_or_null("%ArcanaLabel")
+	if _with_arcana and (arcana_label == null or arcana_label.visible != (not _arcana_choice.is_empty())
+			or (not _arcana_choice.is_empty() and view.arcana.name not in arcana_label.text)):
+		return false
 	_started.append(encounter)
 	return true
 
@@ -203,12 +253,19 @@ func _drive() -> void:
 	if not _session.can_submit() or _probe_result >= 0:
 		return
 	var view := _session.snapshot
+	if view.run_stage == "arcana":
+		_drive_arcana(view)
+		return
 	if view.run_stage == "reward":
 		_drive_reward(view)
 		return
 	if view.encounter_id == 1 and view.revision < 3:
 		if _seat == 2:
-			if view.revision < 2:
+			if _with_arcana and not _probed_old_arcana:
+				_probed_old_arcana = true
+				_probe(view, Authority.Result.STALE_TURN, Authority.Command.ARCANA,
+					{"encounter_id": 0, "arcana_id": ""})
+			elif view.revision < 2:
 				(_combat().get_node("%EndTurnButton") as Button).pressed.emit()
 			elif not _probed_target:
 				_probed_target = true
@@ -239,6 +296,24 @@ func _drive() -> void:
 			_play(view, defense)
 			return
 	(_combat().get_node("%EndTurnButton") as Button).pressed.emit()
+
+
+func _drive_arcana(view: Dictionary) -> void:
+	if view.arcana_submitted or view.arcana_ready != _seat - 1:
+		return
+	if _seat == 2 and _arcana_probes < 2:
+		_arcana_probes += 1
+		if _arcana_probes == 1:
+			_probe(view, Authority.Result.WRONG_PLAYER, Authority.Command.ARCANA, {"actor": "Battle Mage 1", "arcana_id": ""})
+		else:
+			_probe(view, Authority.Result.ILLEGAL_ACTION, Authority.Command.ARCANA, {"arcana_id": "unoffered"})
+		return
+	if _seat == _size:
+		(current_scene.get_node("%SkipReward") as Button).pressed.emit()
+		return
+	var index := _seat - 1
+	_arcana_choice = view.arcana_options[index].id
+	(current_scene.get_node("%RewardChoices").get_child(index) as Button).pressed.emit()
 
 
 func _drive_reward(view: Dictionary) -> void:
@@ -333,7 +408,7 @@ func _probe(view: Dictionary, result: int, kind: Authority.Command, fields: Dict
 	_session._next_sequence += 1
 	var request := {"actor": view.viewer, "sequence": _session._next_sequence,
 		"kind": int(kind), "encounter_id": view.encounter_id}
-	if kind != Authority.Command.REWARD:
+	if kind not in [Authority.Command.REWARD, Authority.Command.ARCANA]:
 		request.merge({"round": view.round, "phase": view.phase, "ready_epoch": view.ready_epoch})
 	request.merge(fields, true)
 	if _session.rpc_id(NetworkSession.SERVER_ID, &"_request_command", request) != OK:
@@ -343,7 +418,7 @@ func _probe(view: Dictionary, result: int, kind: Authority.Command, fields: Dict
 func _on_result(_sequence: int, result: int) -> void:
 	if _probe_result >= 0:
 		if result != _probe_result or _session.snapshot != _probe_before:
-			_fail("A stale reward or invalid target changed the run.")
+			_fail("An invalid or stale command changed the run.")
 		_probe_result = -1
 		return
 	if result != Authority.Result.ACCEPTED:
@@ -377,7 +452,9 @@ func _report(view: Dictionary) -> void:
 	var stage_label: Label = current_scene.get_node("%RunStage")
 	if (view.run_stage != "victory" or "Run Victory" not in stage_label.text
 			or _started != [1, 2, 3] or _rewards_seen != [1, 2]
-			or _partial_seen != [1, 2] or (_seat == 2 and (not _probed_target or not _probed_old_reward))):
+			or _partial_seen != [1, 2] or (_seat == 2 and (not _probed_target or not _probed_old_reward))
+			or (_with_arcana and (_arcana_ready_seen.size() != _size
+				or (_seat == 2 and (_arcana_probes != 2 or not _probed_old_arcana))))):
 		_fail("The run ended without exercising every required encounter, reward, and result.")
 		return
 	_finished = true

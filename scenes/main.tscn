@@ -53,6 +53,12 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Start Multi-Enemy Short Run"
 
+[node name="MajorArcana" type="CheckBox" parent="CenterContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Offer a starting Major Arcana in the solo or local Multi-Enemy Short Run."
+text = "Major Arcana (Prototype)"
+
 [node name="StartLocalMultiEnemyRunButton" type="Button" parent="CenterContainer/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2

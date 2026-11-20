@@ -3,11 +3,12 @@ extends RefCounted
 const CardData = preload("res://scripts/combat/card_data.gd")
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
+const MajorArcana = preload("res://scripts/run/major_arcana.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 
 enum Stage {
 	ROUTE, OPENING_COMBAT, REWARD, BOSS_READY, BOSS_COMBAT, VICTORY, DEFEAT,
-	NEXT_READY, INTERMEDIATE_COMBAT,
+	NEXT_READY, INTERMEDIATE_COMBAT, ARCANA,
 }
 
 const PLAYER_ID := &"Battle Mage"
@@ -21,11 +22,13 @@ var encounter_id := 0
 var active_encounter: EncounterData
 var active_combat: CombatState
 var selected_reward: CardData
+var selected_arcana: StringName
 
 var _data: RunData
 var _deck: Array[CardData]
 var _eligible_rewards: Array[CardData] = []
 var _reward_choices: Array[StringName] = []
+var _arcana_offers: Array[StringName] = []
 var _rng := RandomNumberGenerator.new()
 
 
@@ -37,6 +40,26 @@ func _init(data: RunData) -> void:
 	current_hp = max_hp
 	_deck = data.starting_deck.duplicate()
 	_eligible_rewards = data.eligible_rewards(PLAYER_CLASS)
+	if data.major_arcana_enabled:
+		_arcana_offers = MajorArcana.offers(run_seed, 0, PLAYER_CLASS)
+		stage = Stage.ARCANA
+
+
+func arcana_options() -> Array[Dictionary]:
+	var options: Array[Dictionary] = []
+	if stage == Stage.ARCANA:
+		for id in _arcana_offers:
+			options.append(MajorArcana.view(id))
+	return options
+
+
+func submit_arcana(id: StringName) -> bool:
+	if stage != Stage.ARCANA or (id != &"" and id not in _arcana_offers):
+		return false
+	selected_arcana = id
+	_arcana_offers.clear()
+	stage = Stage.ROUTE
+	return true
 
 
 func deck_cards() -> Array[CardData]:
@@ -124,11 +147,13 @@ func _finish_reward(card: CardData) -> void:
 
 
 func _start_combat(definition: EncounterData, next_stage: Stage) -> void:
-	# Combat owns its piles and modifiers. Only current HP and the run deck cross this boundary.
+	# Combat owns its temporary state. The run carries HP, deck contents, and the Arcana choice.
 	active_encounter = definition.duplicate()
 	active_encounter.player_max_hp = max_hp
 	active_encounter.test_deck = _deck.duplicate()
 	active_encounter.shuffle_seed = _rng.randi()
-	active_combat = CombatState.new(active_encounter, active_encounter.shuffle_seed, [PLAYER_ID], current_hp)
+	var arcana: Dictionary[StringName, StringName] = {PLAYER_ID: selected_arcana}
+	active_combat = CombatState.new(active_encounter, active_encounter.shuffle_seed,
+		[PLAYER_ID], current_hp, {}, {}, arcana)
 	encounter_id += 1
 	stage = next_stage

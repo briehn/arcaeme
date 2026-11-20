@@ -5,6 +5,7 @@ const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const CombatView = preload("res://scripts/combat.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
+const MajorArcana = preload("res://scripts/run/major_arcana.gd")
 const PacingExperiment = preload("res://scripts/run/pacing_experiment.gd")
 const PacingVariantPicker = preload("res://scripts/ui/pacing_variant_picker.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
@@ -32,8 +33,8 @@ const LOCAL_MAGES: Array[StringName] = [&"Battle Mage 1", &"Battle Mage 2"]
 var _run: RunState
 var _local_run: CoopRunState
 var _combat_view: CombatView
-var _local_reward_index := 0
-var _local_reward_revealed := false
+var _local_choice_index := 0
+var _local_choice_revealed := false
 
 
 func _ready() -> void:
@@ -42,7 +43,10 @@ func _ready() -> void:
 		$RunPanel/Layout/Title.text = run_data.title
 	if local_coop:
 		_local_run = CoopRunState.new(run_data, LOCAL_MAGES)
-		_show_local_combat()
+		if _local_run.stage == CoopRunState.ARCANA:
+			_render_panel()
+		else:
+			_show_local_combat()
 		return
 	_run = RunState.new(run_data)
 	_render_panel()
@@ -66,6 +70,10 @@ func _render_solo_panel() -> void:
 	pacing_controls.visible = enable_pacing_variants and _run.stage == RunState.Stage.ROUTE
 	message.text = ""
 	match _run.stage:
+		RunState.Stage.ARCANA:
+			heading.text = "Choose a Major Arcana"
+			message.text = "Choose one provisional Arcana for this run, or skip."
+			_add_arcana_choices(_run.arcana_options(), _submit_solo_arcana)
 		RunState.Stage.ROUTE:
 			heading.text = "Choose an opening encounter"
 			message.text = "Provisional encounter stats"
@@ -100,6 +108,7 @@ func _render_solo_panel() -> void:
 	run_status.text = "Battle Mage  ·  HP %d/%d  ·  Run seed %d" % [_run.current_hp, _run.max_hp, _run.run_seed]
 	if _multi_enemy_route() and _run.encounter_id > 0:
 		run_status.text += "  ·  " + _encounter_title(_run.encounter_id, _run.active_encounter)
+	_append_arcana_name(_run.selected_arcana)
 	_render_deck(_run.deck_cards())
 
 
@@ -108,16 +117,20 @@ func _render_local_panel() -> void:
 	deck_list.hide()
 	deck_title.text = ""
 	deck_list.text = ""
+	if _local_run.stage == CoopRunState.ARCANA:
+		_render_local_arcana()
+		return
 	run_status.text = _encounter_title(_local_run.encounter_id, _local_run.active_encounter)
 	for mage in _local_run.active_combat.players.values():
 		run_status.text += "\n%s  ·  HP %d/%d" % [mage.id, mage.hp, mage.max_hp]
 	match _local_run.stage:
 		CoopRunState.REWARD:
-			var player := LOCAL_MAGES[_local_reward_index]
+			var player := LOCAL_MAGES[_local_choice_index]
 			var view := _local_run.view_fields(player)
 			heading.text = "Card reward  ·  %d/%d decisions submitted" % [view.reward_ready, LOCAL_MAGES.size()]
-			if _local_reward_revealed:
+			if _local_choice_revealed:
 				message.text = "%s: choose a Battle Mage card or skip. Next: %s." % [player, view.next_encounter_name]
+				_append_arcana_name(_local_run.selected_arcana(player))
 				deck_title.show()
 				deck_list.show()
 				_render_deck(_local_run.deck_cards(player))
@@ -127,7 +140,7 @@ func _render_local_panel() -> void:
 				_add_choice("Skip Reward", _submit_local_reward.bind(&"", player, _local_run.encounter_id))
 			else:
 				message.text = "Pass controls to %s. Next: %s." % [player, view.next_encounter_name]
-				_add_choice("Show %s Reward" % player, _show_local_reward.bind(player, _local_run.encounter_id))
+				_add_choice("Show %s Reward" % player, _show_local_choice.bind(player, _local_run.encounter_id, CoopRunState.REWARD))
 		CoopRunState.VICTORY:
 			heading.text = "Run Victory"
 			message.text = "Your party defeated %s and completed the prototype run." % _local_run.active_encounter.enemy_name
@@ -136,24 +149,65 @@ func _render_local_panel() -> void:
 			message.text = "%s ended your run." % _local_run.active_encounter.enemy_name
 
 
-func _show_local_reward(player: StringName, encounter_id: int) -> void:
-	if (_local_run.stage == CoopRunState.REWARD and not _local_reward_revealed
-			and _local_run.encounter_id == encounter_id and LOCAL_MAGES[_local_reward_index] == player):
-		_local_reward_revealed = true
+func _render_local_arcana() -> void:
+	var player := LOCAL_MAGES[_local_choice_index]
+	var view := _local_run.view_fields(player)
+	run_status.text = "%d/%d Arcana decisions submitted" % [view.arcana_ready, LOCAL_MAGES.size()]
+	heading.text = "Choose a Major Arcana"
+	if _local_choice_revealed:
+		message.text = "%s: choose one provisional Arcana for this run, or skip." % player
+		_add_arcana_choices(view.arcana_options, _submit_local_arcana.bind(player))
+	else:
+		message.text = "Pass controls to %s." % player
+		_add_choice("Show %s Arcana" % player, _show_local_choice.bind(player, 0, CoopRunState.ARCANA))
+
+
+func _add_arcana_choices(options: Array, submit: Callable) -> void:
+	for option: Dictionary in options:
+		_add_choice("%s\n%s" % [option.name, option.description], submit.bind(StringName(option.id)))
+	_add_choice("Skip Arcana", submit.bind(&""))
+
+
+func _append_arcana_name(id: StringName) -> void:
+	if id != &"":
+		run_status.text += "\nMajor Arcana: " + String(MajorArcana.view(id).name)
+
+
+func _submit_solo_arcana(id: StringName) -> void:
+	if _run.submit_arcana(id):
 		_render_panel()
+
+
+func _show_local_choice(player: StringName, encounter_id: int, stage: String) -> void:
+	if (_local_run.stage == stage and not _local_choice_revealed
+			and _local_run.encounter_id == encounter_id and LOCAL_MAGES[_local_choice_index] == player):
+		_local_choice_revealed = true
+		_render_panel()
+
+
+func _submit_local_arcana(id: StringName, player: StringName) -> void:
+	if (not _local_choice_revealed or _local_run.stage != CoopRunState.ARCANA
+			or LOCAL_MAGES[_local_choice_index] != player or not _local_run.submit_arcana(player, id)):
+		return
+	_advance_local_choice(CoopRunState.ARCANA)
 
 
 func _submit_local_reward(card_id: StringName, player: StringName, encounter_id: int) -> void:
-	if (not _local_reward_revealed or _local_run.stage != CoopRunState.REWARD
-			or _local_run.encounter_id != encounter_id or LOCAL_MAGES[_local_reward_index] != player):
+	if (not _local_choice_revealed or _local_run.stage != CoopRunState.REWARD
+			or _local_run.encounter_id != encounter_id or LOCAL_MAGES[_local_choice_index] != player):
 		return
 	if not _local_run.submit_reward(player, card_id):
 		return
-	_local_reward_revealed = false
-	if _local_run.stage == CoopRunState.REWARD:
-		_local_reward_index += 1
+	_advance_local_choice(CoopRunState.REWARD)
+
+
+func _advance_local_choice(stage: String) -> void:
+	_local_choice_revealed = false
+	if _local_run.stage == stage:
+		_local_choice_index += 1
 		_render_panel()
 	else:
+		_local_choice_index = 0
 		_show_local_combat()
 
 
@@ -256,8 +310,8 @@ func _finish_encounter(combat: CombatState) -> void:
 				or combat.phase not in [CombatState.Phase.VICTORY, CombatState.Phase.DEFEAT]):
 			return
 		_local_run.observe_combat_result()
-		_local_reward_index = 0
-		_local_reward_revealed = false
+		_local_choice_index = 0
+		_local_choice_revealed = false
 	elif not _run.finish_combat(combat):
 		return
 	remove_child(_combat_view)

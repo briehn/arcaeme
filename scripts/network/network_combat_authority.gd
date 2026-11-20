@@ -6,7 +6,7 @@ const ViewSnapshot = preload("res://scripts/combat/combat_view_snapshot.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
 
-enum Command { PLAY_CARD, END_TURN, REWARD, UNDO_READY }
+enum Command { PLAY_CARD, END_TURN, REWARD, UNDO_READY, ARCANA }
 enum Result { ACCEPTED, UNKNOWN_PEER, MALFORMED, WRONG_PLAYER, DUPLICATE, STALE_TURN, ILLEGAL_ACTION }
 
 var _encounter: EncounterData
@@ -17,13 +17,14 @@ var _run: CoopRunState
 var _run_revision := 0
 
 
-func _init(encounter: EncounterData, assignments: Dictionary[int, StringName], run_data: RunData = null) -> void:
+func _init(encounter: EncounterData, assignments: Dictionary[int, StringName], run_data: RunData = null,
+		offer_seed: Variant = null) -> void:
 	_encounter = encounter
 	_assignments = assignments.duplicate()
 	var player_ids: Array[StringName] = []
 	player_ids.assign(_assignments.values())
 	if run_data != null:
-		_run = CoopRunState.new(run_data, player_ids)
+		_run = CoopRunState.new(run_data, player_ids, offer_seed)
 		_encounter = _run.active_encounter
 		_state = _run.active_combat
 	else:
@@ -34,11 +35,14 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	if not _assignments.has(peer_id):
 		return {}
 	var player_id := _assignments[peer_id]
-	var view := ViewSnapshot.build(_state, _encounter, player_id)
+	var view := {"viewer": String(player_id), "revision": 0}
+	if _state != null:
+		view = ViewSnapshot.build(_state, _encounter, player_id)
 	if _run != null:
 		# Seat-local IDs keep changes to one player's deck size out of other hand snapshots.
-		for card in view["hand"]:
-			card["copy"] -= _state.players[player_id].first_copy_id
+		if _state != null:
+			for card in view["hand"]:
+				card["copy"] -= _state.players[player_id].first_copy_id
 		view.merge(_run.view_fields(player_id))
 		view["run_revision"] = _run_revision
 	return view
@@ -58,6 +62,13 @@ func submit(peer_id: int, request: Variant) -> Result:
 	_last_sequence[peer_id] = sequence
 	if _run != null and request["encounter_id"] != _run.encounter_id:
 		return Result.STALE_TURN
+	if request["kind"] == Command.ARCANA:
+		if not _run.submit_arcana(player_id, StringName(request["arcana_id"])):
+			return Result.ILLEGAL_ACTION
+		_encounter = _run.active_encounter
+		_state = _run.active_combat
+		_run_revision += 1
+		return Result.ACCEPTED
 	if request["kind"] == Command.REWARD:
 		if not _run.submit_reward(player_id, StringName(request["reward_id"])):
 			return Result.ILLEGAL_ACTION
@@ -98,6 +109,9 @@ func _valid_shape(request: Dictionary) -> bool:
 		return false
 	if not request.get("kind") is int:
 		return false
+	if request["kind"] == Command.ARCANA:
+		return (_run != null and request.size() == 5 and request.get("encounter_id") is int
+			and request["encounter_id"] == 0 and request.get("arcana_id") is String)
 	if _run != null and (not request.get("encounter_id") is int or request["encounter_id"] <= 0):
 		return false
 	if request["kind"] == Command.REWARD:

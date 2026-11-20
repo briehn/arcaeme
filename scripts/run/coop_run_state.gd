@@ -3,9 +3,11 @@ extends RefCounted
 const CardData = preload("res://scripts/combat/card_data.gd")
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
+const MajorArcana = preload("res://scripts/run/major_arcana.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 
 const OPENING := "opening"
+const ARCANA := "arcana"
 const INTERMEDIATE := "intermediate"
 const REWARD := "reward"
 const BOSS := "boss"
@@ -22,12 +24,14 @@ var _player_ids: Array[StringName]
 var _decks: Dictionary[StringName, Array] = {}
 var _current_hps: Dictionary[StringName, int] = {}
 var _reward_choices: Dictionary[StringName, Array] = {}
+var _arcana_offers: Dictionary[StringName, Array] = {}
+var _arcana_choices: Dictionary[StringName, StringName] = {}
 var _reward_ready := 0
 var _offers: Array[CardData]
 var _rng := RandomNumberGenerator.new()
 
 
-func _init(data: RunData, player_ids: Array[StringName]) -> void:
+func _init(data: RunData, player_ids: Array[StringName], offer_seed: Variant = null) -> void:
 	_data = data
 	_player_ids = player_ids.duplicate()
 	_rng.seed = data.run_seed
@@ -36,12 +40,35 @@ func _init(data: RunData, player_ids: Array[StringName]) -> void:
 		_decks[player_id] = data.starting_deck.duplicate()
 		_current_hps[player_id] = data.player_max_hp
 		_reward_choices[player_id] = []
-	# Co-op uses the first configured opening encounter.
-	_start_encounter(data.opening_encounters[0])
+	if data.major_arcana_enabled:
+		stage = ARCANA
+		var arcana_seed := data.run_seed if offer_seed == null else int(offer_seed)
+		for seat in _player_ids.size():
+			_arcana_offers[_player_ids[seat]] = MajorArcana.offers(arcana_seed, seat, RunData.BATTLE_MAGE)
+	else:
+		_start_encounter(data.opening_encounters[0])
+
+
+func selected_arcana(player_id: StringName) -> StringName:
+	return _arcana_choices.get(player_id, &"")
+
+
+func submit_arcana(player_id: StringName, id: StringName) -> bool:
+	if stage != ARCANA or not _arcana_offers.has(player_id) or _arcana_choices.has(player_id):
+		return false
+	if id != &"" and id not in _arcana_offers[player_id]:
+		return false
+	_arcana_choices[player_id] = id
+	if _arcana_choices.size() == _player_ids.size():
+		_arcana_offers.clear()
+		stage = OPENING
+		# Co-op uses the first configured opening encounter.
+		_start_encounter(_data.opening_encounters[0])
+	return true
 
 
 func observe_combat_result() -> void:
-	if stage == REWARD or stage == VICTORY or stage == DEFEAT:
+	if active_combat == null or stage == REWARD or stage == VICTORY or stage == DEFEAT:
 		return
 	match active_combat.phase:
 		CombatState.Phase.DEFEAT:
@@ -100,7 +127,16 @@ func view_fields(player_id: StringName) -> Dictionary:
 	}
 	if not _data.title.is_empty():
 		view["run_title"] = _data.title
-	if stage == REWARD:
+	if stage == ARCANA:
+		var submitted := _arcana_choices.has(player_id)
+		var options: Array[Dictionary] = []
+		if not submitted:
+			for id: StringName in _arcana_offers[player_id]:
+				options.append(MajorArcana.view(id))
+		view.merge({
+			"arcana_ready": _arcana_choices.size(), "arcana_submitted": submitted, "arcana_options": options,
+		})
+	elif stage == REWARD:
 		var submitted := _reward_choices[player_id].size() == encounter_id
 		var options: Array[Dictionary] = []
 		if not submitted:
@@ -119,6 +155,7 @@ func _start_encounter(definition: EncounterData) -> void:
 	active_encounter = definition.duplicate()
 	active_encounter.player_max_hp = _data.player_max_hp
 	active_encounter.shuffle_seed = _rng.randi()
-	active_combat = CombatState.new(active_encounter, active_encounter.shuffle_seed, _player_ids, -1, _decks, _current_hps)
+	active_combat = CombatState.new(active_encounter, active_encounter.shuffle_seed,
+		_player_ids, -1, _decks, _current_hps, _arcana_choices)
 	_reward_ready = 0
 	encounter_id += 1

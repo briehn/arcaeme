@@ -6,6 +6,7 @@ const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
 const EnemyData = preload("res://scripts/combat/enemy_data.gd")
 const EnemyState = preload("res://scripts/combat/enemy_state.gd")
+const MajorArcana = preload("res://scripts/run/major_arcana.gd")
 
 enum Phase { PLAYER, ENEMY, VICTORY, DEFEAT }
 
@@ -27,6 +28,11 @@ class PlayerState:
 	# Ready is reversible until the shared phase closes.
 	var ended_turn: bool
 	var ready_epoch: int
+	var arcana_id: StringName
+	var arcana_used: bool
+	var arcana_attacks: int
+	var arcana_saw_attack: bool
+	var arcana_saw_non_attack: bool
 	var recovered_after_victory: bool
 	var first_copy_id: int
 	var hand: Array[int] = []
@@ -67,7 +73,8 @@ var _rng := RandomNumberGenerator.new()
 
 
 func _init(encounter: EncounterData, encounter_seed: int, player_ids: Array[StringName], starting_hp := -1,
-		player_decks: Dictionary[StringName, Array] = {}, player_hps: Dictionary[StringName, int] = {}) -> void:
+		player_decks: Dictionary[StringName, Array] = {}, player_hps: Dictionary[StringName, int] = {},
+		arcana_by_player: Dictionary[StringName, StringName] = {}) -> void:
 	assert(not player_ids.is_empty(), "Combat requires at least one player.")
 	shuffle_seed = encounter_seed
 	_rng.seed = shuffle_seed
@@ -85,6 +92,7 @@ func _init(encounter: EncounterData, encounter_seed: int, player_ids: Array[Stri
 		assert(not players.has(player_id), "Combat player IDs must be unique.")
 		var player := PlayerState.new()
 		player.id = player_id
+		player.arcana_id = arcana_by_player.get(player_id, &"")
 		player.max_hp = encounter.player_max_hp
 		player.hp = player_hps.get(player_id, player.max_hp if starting_hp < 0 else starting_hp)
 		player.first_copy_id = _cards.size()
@@ -98,6 +106,28 @@ func _init(encounter: EncounterData, encounter_seed: int, player_ids: Array[Stri
 
 func card_data(copy_id: int) -> CardData:
 	return _cards[copy_id]
+
+
+func arcana_view(player_id: StringName) -> Dictionary:
+	var player := players[player_id]
+	var view := MajorArcana.view(player.arcana_id)
+	match player.arcana_id:
+		MajorArcana.MAGICIAN:
+			if player.arcana_used:
+				view["progress"] = "Used this round"
+			elif player.arcana_saw_attack:
+				view["progress"] = "Needs a non-Attack"
+			elif player.arcana_saw_non_attack:
+				view["progress"] = "Needs an Attack"
+			else:
+				view["progress"] = "Needs an Attack and a non-Attack"
+		MajorArcana.STRENGTH:
+			view["progress"] = "%d/%d Attacks this combat" % [player.arcana_attacks, MajorArcana.STRENGTH_ATTACKS]
+		MajorArcana.JUSTICE:
+			view["progress"] = "Used this round" if player.arcana_used else "Available this round"
+		MajorArcana.TOWER:
+			view["progress"] = "Used this combat" if player.arcana_used else "Available this combat"
+	return view
 
 
 func enemy_state(target_id: StringName) -> EnemyState:
@@ -132,6 +162,10 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 	var player := players[player_id]
 	var card := card_data(copy_id)
 	var target := enemy_state(target_id)
+	var justice_qualifies := (player.arcana_id == MajorArcana.JUSTICE and not player.arcana_used
+		and card.is_attack and player.block >= MajorArcana.JUSTICE_THRESHOLD)
+	var tower_available := player.arcana_id == MajorArcana.TOWER and not player.arcana_used and card.is_attack
+	var tower_triggered := false
 	action_history.append({&"command": &"play_card", &"player": player_id,
 		&"copy": copy_id, &"target": target_id})
 	player.mana -= card.mana_cost
@@ -140,7 +174,9 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 	for effect in card.effects:
 		match effect.kind:
 			CardEffect.Kind.DAMAGE:
-				_deal_card_damage(player, target, card, effect)
+				var tower_bonus := MajorArcana.TOWER_DAMAGE if tower_available and not tower_triggered else 0
+				tower_triggered = tower_triggered or tower_bonus > 0
+				_deal_card_damage(player, target, card, effect, tower_bonus)
 			CardEffect.Kind.GAIN_BLOCK:
 				var block_gain := effect.amount
 				if block_gain > 0:
@@ -164,6 +200,7 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 				if effect.amount > 0:
 					player.dexterity += effect.amount
 					_log("%s gained %d Dexterity." % [player.id, effect.amount])
+	_resolve_arcana_after_card(player, card, justice_qualifies, tower_triggered)
 	player.discard_pile.append(copy_id)
 	_finish_if_enemies_down()
 	return true
@@ -238,7 +275,35 @@ func _finalize_player_turn(player: PlayerState) -> void:
 			_log("%s was defeated." % player.id)
 
 
-func _deal_card_damage(player: PlayerState, enemy: EnemyState, card: CardData, effect: CardEffect) -> void:
+func _resolve_arcana_after_card(player: PlayerState, card: CardData, justice_qualifies: bool, tower_triggered: bool) -> void:
+	match player.arcana_id:
+		MajorArcana.MAGICIAN:
+			if not player.arcana_used:
+				player.arcana_saw_attack = player.arcana_saw_attack or card.is_attack
+				player.arcana_saw_non_attack = player.arcana_saw_non_attack or not card.is_attack
+				if player.arcana_saw_attack and player.arcana_saw_non_attack:
+					player.arcana_used = true
+					_draw(player, 1)
+		MajorArcana.STRENGTH:
+			if card.is_attack and player.arcana_attacks < MajorArcana.STRENGTH_ATTACKS:
+				player.arcana_attacks += 1
+				if player.arcana_attacks == MajorArcana.STRENGTH_ATTACKS:
+					player.strength += 1
+					_log("%s gained 1 Strength." % player.id)
+		MajorArcana.JUSTICE:
+			if justice_qualifies:
+				player.arcana_used = true
+				player.block += MajorArcana.JUSTICE_BLOCK
+				_log("%s gained %d Block." % [player.id, MajorArcana.JUSTICE_BLOCK])
+		MajorArcana.TOWER:
+			if tower_triggered:
+				player.arcana_used = true
+				player.burning += MajorArcana.TOWER_BURNING
+				_log_status_application(player.id, MajorArcana.TOWER_BURNING, "Burning")
+
+
+func _deal_card_damage(player: PlayerState, enemy: EnemyState, card: CardData, effect: CardEffect,
+		arcana_bonus: int) -> void:
 	var damage := effect.amount
 	if effect.block_per_bonus > 0:
 		@warning_ignore("integer_division")
@@ -262,6 +327,7 @@ func _deal_card_damage(player: PlayerState, enemy: EnemyState, card: CardData, e
 		damage += player.next_attack_bonus
 		_log("%s used their preparation for +%d Attack damage." % [player.id, player.next_attack_bonus])
 		player.next_attack_bonus = 0
+	damage += arcana_bonus
 	var enemy_label := _enemy_label(enemy)
 	var absorbed := mini(enemy.block, maxi(0, damage))
 	if absorbed > 0:
@@ -319,6 +385,10 @@ func _begin_player_phase() -> void:
 				continue
 		player.mana = TURN_MANA
 		player.ended_turn = false
+		if player.arcana_id in [MajorArcana.MAGICIAN, MajorArcana.JUSTICE]:
+			player.arcana_used = false
+			player.arcana_saw_attack = false
+			player.arcana_saw_non_attack = false
 		_draw(player, TURN_DRAW)
 	_finish_if_party_down()
 

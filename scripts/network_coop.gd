@@ -21,6 +21,7 @@ const MULTI_ENEMY_RUN = preload("res://resources/prototype/multi_enemy_run.tres"
 @onready var short_run_field: CheckBox = %ShortRun
 @onready var enemy_variety_run_field: CheckBox = %EnemyVarietyRun
 @onready var multi_enemy_run_field: CheckBox = %MultiEnemyRun
+@onready var major_arcana_field: CheckBox = %MajorArcana
 @onready var pacing_controls: HBoxContainer = %PacingControls
 @onready var pacing_variant_field: PacingVariantPicker = %PacingVariant
 @onready var status_playtest_field: CheckBox = %StatusPlaytest
@@ -79,6 +80,7 @@ func _refresh() -> void:
 	short_run_field.disabled = connected_or_waiting
 	enemy_variety_run_field.disabled = connected_or_waiting or not short_run_field.button_pressed
 	multi_enemy_run_field.disabled = connected_or_waiting or not short_run_field.button_pressed
+	major_arcana_field.disabled = connected_or_waiting or not major_arcana_field.visible
 	pacing_variant_field.disabled = connected_or_waiting or not enemy_variety_run_field.button_pressed
 	status_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
 	modifier_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
@@ -100,6 +102,8 @@ func _refresh_session_view() -> void:
 	var configured_title: String = session.snapshot.get("run_title", "")
 	var stage_title := ""
 	match stage:
+		CoopRunState.ARCANA:
+			stage_title = "Choose a Major Arcana"
 		CoopRunState.OPENING:
 			stage_title = "Opening Encounter"
 		CoopRunState.INTERMEDIATE:
@@ -115,7 +119,7 @@ func _refresh_session_view() -> void:
 	run_stage_label.visible = not stage_title.is_empty()
 	var run_title := "Network Short Run Prototype" if configured_title.is_empty() else configured_title
 	var encounter_count: int = session.snapshot.get("encounter_count", 0)
-	if encounter_count > 2:
+	if encounter_count > 2 and stage != CoopRunState.ARCANA:
 		var index: int = session.snapshot["encounter_id"]
 		var encounter_name: String = session.snapshot["enemy_name"]
 		if stage == CoopRunState.BOSS:
@@ -126,9 +130,9 @@ func _refresh_session_view() -> void:
 		else:
 			stage_title = encounter_title
 	run_stage_label.text = "%s  /  %s" % [run_title, stage_title]
-	if stage == CoopRunState.REWARD:
+	if stage == CoopRunState.REWARD or stage == CoopRunState.ARCANA:
 		combat_slot.hide()
-		_refresh_rewards()
+		_refresh_choices(stage == CoopRunState.ARCANA)
 		return
 	if reward_panel.visible:
 		reward_panel.hide()
@@ -142,36 +146,48 @@ func _refresh_session_view() -> void:
 		combat_slot.show()
 
 
-func _refresh_rewards() -> void:
+func _refresh_choices(selecting_arcana: bool) -> void:
 	var opening_panel := not reward_panel.visible
+	var prefix := "arcana" if selecting_arcana else "reward"
+	var category := "Arcana" if selecting_arcana else "reward"
 	reward_panel.show()
-	reward_progress.text = "%d/%d reward decisions submitted" % [session.snapshot["reward_ready"], session.party_size]
+	reward_progress.text = "%d/%d %s decisions submitted" % [
+		session.snapshot[prefix + "_ready"], session.party_size, category]
 	var connected := session.status == NetworkSession.Status.ACTIVE
-	var submitted: bool = session.snapshot["reward_submitted"]
+	var submitted: bool = session.snapshot[prefix + "_submitted"]
 	var choosing := connected and not submitted
 	if not connected:
 		reward_status.text = "The session ended."
+	elif selecting_arcana:
+		reward_status.text = ("Arcana decision submitted. The run begins after everyone's decision." if submitted
+			else "Choose one provisional Major Arcana for this run, or skip.")
 	elif submitted:
 		var configured_title: String = session.snapshot.get("run_title", "")
 		var next_encounter := "boss" if configured_title.is_empty() else "final encounter"
 		reward_status.text = "Reward decision submitted. The %s begins when everyone is ready." % next_encounter
 	else:
 		reward_status.text = "Choose one provisional Battle Mage card for your run deck, or skip."
-	if connected and session.snapshot.get("encounter_count", 0) > 2:
+	if connected and not selecting_arcana and session.snapshot.get("encounter_count", 0) > 2:
 		reward_status.text = ("Reward decision submitted." if submitted
 			else "Choose one provisional Battle Mage card for your run deck, or skip.")
 		reward_status.text += " Next: %s, after everyone's decision." % session.snapshot["next_encounter_name"]
+	var arcana: Dictionary = session.snapshot.get("arcana", {})
+	if not arcana.is_empty():
+		reward_status.text += "\nMajor Arcana: " + String(arcana.name)
+	skip_reward_button.text = "Skip Arcana" if selecting_arcana else "Skip Reward"
 	skip_reward_button.visible = choosing
 	if not choosing:
 		_clear_reward_choices()
 		return
 	if reward_choices.get_child_count() == 0:
-		for card: Dictionary in session.snapshot["reward_options"]:
+		var submit: Callable = session.submit_arcana if selecting_arcana else session.submit_reward
+		for card: Dictionary in session.snapshot[prefix + "_options"]:
 			var button := WrappedTextButton.new()
-			button.text = "%s  ·  %d Mana\n%s" % [card["name"], card["cost"], card["description"]]
+			button.text = ("%s\n%s" % [card.name, card.description] if selecting_arcana
+				else "%s  ·  %d Mana\n%s" % [card.name, card.cost, card.description])
 			button.custom_minimum_size.y = 56
 			button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			button.pressed.connect(session.submit_reward.bind(card["id"]))
+			button.pressed.connect(submit.bind(String(card.id)))
 			reward_choices.add_child(button)
 	var input_allowed := session.can_submit()
 	for button: Button in reward_choices.get_children():
@@ -224,6 +240,10 @@ func _on_multi_enemy_run_toggled(enabled: bool) -> void:
 
 func _refresh_run_variant() -> void:
 	var variety := enemy_variety_run_field.button_pressed
+	major_arcana_field.visible = short_run_field.button_pressed and multi_enemy_run_field.button_pressed
+	major_arcana_field.disabled = not major_arcana_field.visible
+	if not major_arcana_field.visible:
+		major_arcana_field.set_pressed_no_signal(false)
 	if variety:
 		session.run_data = ENEMY_VARIETY_RUN
 	elif multi_enemy_run_field.button_pressed:
@@ -305,6 +325,11 @@ func _on_host_pressed() -> void:
 			else PacingExperiment.make_run(ENEMY_VARIETY_RUN, variant, party_size)
 		if card_expansion_field.button_pressed:
 			session.run_data = CardExpansionPlaytest.with_expansion_run(session.run_data)
+	elif multi_enemy_run_field.button_pressed:
+		session.run_data = MULTI_ENEMY_RUN
+		if major_arcana_field.button_pressed:
+			session.run_data = MULTI_ENEMY_RUN.duplicate()
+			session.run_data.major_arcana_enabled = true
 	session.host(int(port_field.value), party_size, short_run_field.button_pressed)
 
 
@@ -313,7 +338,10 @@ func _on_join_pressed() -> void:
 
 
 func _on_skip_reward_pressed() -> void:
-	session.submit_reward("")
+	if session.snapshot.get("run_stage") == CoopRunState.ARCANA:
+		session.submit_arcana("")
+	else:
+		session.submit_reward("")
 
 
 func _on_leave_pressed() -> void:

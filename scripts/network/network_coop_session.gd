@@ -86,6 +86,12 @@ func submit_reward(card_id: String) -> bool:
 	return _submit(Authority.Command.REWARD, -1, card_id)
 
 
+func submit_arcana(arcana_id: String) -> bool:
+	if snapshot.get("run_stage") != CoopRunState.ARCANA or snapshot.get("arcana_submitted", true):
+		return false
+	return _submit(Authority.Command.ARCANA, -1, arcana_id)
+
+
 func _open(port: int, as_host: bool, seats: int, short_run := false) -> Error:
 	if _transport != null:
 		return ERR_ALREADY_IN_USE
@@ -160,7 +166,15 @@ func _on_peer_connected(peer_id: int) -> void:
 	_publish_roster()
 	if _assignments.size() == party_size:
 		_transport.refuse_new_connections = true
-		_authority = Authority.new(encounter, _assignments, run_data if _hosting_short_run else null)
+		var offer_seed: Variant = null
+		if _hosting_short_run and run_data.major_arcana_enabled:
+			# Do not derive hosted offers from the public fixture's combat seed.
+			var entropy := Crypto.new().generate_random_bytes(8)
+			if entropy.size() != 8:
+				_disconnect("Could not generate private opening offers.")
+				return
+			offer_seed = entropy.decode_s64(0)
+		_authority = Authority.new(encounter, _assignments, run_data if _hosting_short_run else null, offer_seed)
 		_publish(0, 0)
 
 
@@ -236,16 +250,20 @@ func _close_transport() -> void:
 		peer.close()
 
 
-func _submit(kind: Authority.Command, copy_id: int = -1, reward_id := "", target_id: StringName = &"") -> bool:
+func _submit(kind: Authority.Command, copy_id: int = -1, choice_id := "", target_id: StringName = &"") -> bool:
 	if not can_submit():
+		return false
+	if snapshot.get("run_stage") == CoopRunState.ARCANA and kind != Authority.Command.ARCANA:
 		return false
 	_next_sequence += 1
 	_pending_sequence = _next_sequence
 	var request := {"actor": snapshot["viewer"], "sequence": _pending_sequence, "kind": int(kind)}
 	if snapshot.has("encounter_id"):
 		request["encounter_id"] = snapshot["encounter_id"]
-	if kind == Authority.Command.REWARD:
-		request["reward_id"] = reward_id
+	if kind == Authority.Command.ARCANA:
+		request["arcana_id"] = choice_id
+	elif kind == Authority.Command.REWARD:
+		request["reward_id"] = choice_id
 	else:
 		request["round"] = snapshot["round"]
 		request["phase"] = snapshot["phase"]
@@ -309,7 +327,7 @@ func _from_host() -> bool:
 
 
 func _apply_snapshot(view: Dictionary, sequence: int, result: int) -> void:
-	# Encounter-local combat revisions restart at the boss. Run revisions include reward submissions.
+	# Run revisions include Arcana and rewards, while combat revisions restart each encounter.
 	if not snapshot.is_empty():
 		var incoming_revision: int = view.get("run_revision", view["revision"])
 		var current_revision: int = snapshot.get("run_revision", snapshot["revision"])
