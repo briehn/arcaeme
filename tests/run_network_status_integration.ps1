@@ -3,7 +3,8 @@ param(
     [ValidateRange(1024, 65530)] [int]$BasePort = 27100,
     [ValidateRange(2, 4)] [int[]]$PartySizes = @(2, 3, 4),
     [switch]$Native,
-    [ValidateSet('statuses', 'modifiers', 'enemies')] [string]$Playtest = 'statuses'
+    [ValidateSet('statuses', 'modifiers', 'enemies', 'enemy-actions')] [string]$Playtest = 'statuses',
+    [ValidateSet('Buff', 'Block')] [string]$EnemyActionFixture = 'Buff'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +13,7 @@ $project = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $fixtureScript = switch ($Playtest) {
     'modifiers' { 'network_modifiers_integration.gd' }
     'enemies' { 'network_enemy_patterns_integration.gd' }
+    'enemy-actions' { 'network_enemy_actions_integration.gd' }
     default { 'network_status_integration.gd' }
 }
 $logFolder = Join-Path $env:TEMP ("arcaeme-network-$Playtest-test-" + [Guid]::NewGuid().ToString('N'))
@@ -24,6 +26,7 @@ function Start-Participant([int]$Port, [int]$Size, [int]$Seat, [string]$ReleaseP
     $arguments += @('--path', ('"' + $project + '"'), '--log-file', ('"' + $prefix + '.log"'),
         '--script', "res://tests/$fixtureScript", '--', $Port, $Size, $Seat,
         ('"' + $ReleasePath + '"'))
+    if ($Playtest -eq 'enemy-actions') { $arguments += $EnemyActionFixture }
     $process = Start-Process -FilePath $engine -ArgumentList $arguments -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput "$prefix.stdout" -RedirectStandardError "$prefix.stderr"
     return @{ Process = $process; Output = "$prefix.stdout"; Errors = "$prefix.stderr" }

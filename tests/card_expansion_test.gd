@@ -85,6 +85,7 @@ func _test_catalog_and_fixtures() -> void:
 
 
 func _test_salvo() -> void:
+	_check(SALVO.description() == "Deal 7 damage twice.", "Astral Salvo uses its approved wording")
 	var standalone := _combat([SALVO])
 	_play(standalone, SALVO)
 	_check(standalone.enemy_hp == 86 and standalone.players[HOST].mana == 1
@@ -142,6 +143,7 @@ func _test_warded_strike() -> void:
 
 
 func _test_prism_wall() -> void:
+	_check(WALL.description() == "Gain 8 Block twice.", "Prism Wall uses its approved wording")
 	var standalone := _combat([WALL])
 	_play(standalone, WALL)
 	_check(standalone.players[HOST].block == 16 and standalone.players[HOST].mana == 1,

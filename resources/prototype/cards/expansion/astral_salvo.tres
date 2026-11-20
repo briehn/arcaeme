@@ -19,6 +19,7 @@ id = &"astral_salvo"
 display_name = "Astral Salvo"
 mana_cost = 2
 approval_status = "Provisional"
+description_override = "Deal 7 damage twice."
 is_attack = true
 owner_class_id = &"battle_mage"
 effects = Array[ExtResource("2_effect")]([SubResource("Effect_1"), SubResource("Effect_2")])

@@ -10,9 +10,13 @@ const CardEffect = preload("res://scripts/combat/card_effect.gd")
 ## Leave empty for unclassified cards. Use &"universal" for Universal Cards.
 @export var owner_class_id: StringName
 @export var effects: Array[CardEffect] = []
+## Optional display wording. Combat always resolves the ordered effects above.
+@export var description_override: String
 
 
 func description() -> String:
+	if not description_override.is_empty():
+		return description_override
 	var lines := PackedStringArray()
 	for effect in effects:
 		lines.append(effect.describe())

@@ -1,0 +1,36 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/encounter_data.gd" id="1_encounter"]
+[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="2_card"]
+[ext_resource type="Script" path="res://scripts/combat/enemy_action.gd" id="3_enemy_action"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/basic_strike.tres" id="basic_strike"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/basic_block.tres" id="basic_block"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_guard.tres" id="arcane_guard"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/shieldstrike.tres" id="shieldstrike"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/battle_preparation.tres" id="battle_preparation"]
+[ext_resource type="Resource" path="res://resources/prototype/cards/arcane_reversal.tres" id="arcane_reversal"]
+
+[sub_resource type="Resource" id="Action_1"]
+script = ExtResource("3_enemy_action")
+kind = 2
+amount = 3
+
+[sub_resource type="Resource" id="Action_2"]
+script = ExtResource("3_enemy_action")
+kind = 0
+amount = 7
+
+[sub_resource type="Resource" id="Action_3"]
+script = ExtResource("3_enemy_action")
+kind = 0
+amount = 11
+
+[resource]
+script = ExtResource("1_encounter")
+player_max_hp = 36
+enemy_id = &"strengthening_goblin"
+enemy_name = "Strengthening Goblin"
+enemy_max_hp = 35
+action_cycle = Array[ExtResource("3_enemy_action")]([SubResource("Action_1"), SubResource("Action_2"), SubResource("Action_3")])
+shuffle_seed = 104774
+test_deck = Array[ExtResource("2_card")]([ExtResource("basic_strike"), ExtResource("basic_strike"), ExtResource("basic_strike"), ExtResource("basic_strike"), ExtResource("basic_strike"), ExtResource("basic_block"), ExtResource("basic_block"), ExtResource("basic_block"), ExtResource("basic_block"), ExtResource("arcane_guard"), ExtResource("arcane_guard"), ExtResource("shieldstrike"), ExtResource("shieldstrike"), ExtResource("battle_preparation"), ExtResource("battle_preparation"), ExtResource("arcane_reversal"), ExtResource("arcane_reversal")])

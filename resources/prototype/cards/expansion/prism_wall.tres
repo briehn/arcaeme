@@ -19,5 +19,6 @@ id = &"prism_wall"
 display_name = "Prism Wall"
 mana_cost = 2
 approval_status = "Provisional"
+description_override = "Gain 8 Block twice."
 owner_class_id = &"battle_mage"
 effects = Array[ExtResource("2_effect")]([SubResource("Effect_1"), SubResource("Effect_2")])

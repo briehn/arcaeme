@@ -3,6 +3,7 @@ extends RefCounted
 const CardData = preload("res://scripts/combat/card_data.gd")
 const CardEffect = preload("res://scripts/combat/card_effect.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
+const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
 
 enum Phase { PLAYER, ENEMY, VICTORY, DEFEAT }
 
@@ -33,6 +34,7 @@ var phase: Phase = Phase.PLAYER
 var round_number: int
 var shuffle_seed: int
 var enemy_hp: int
+var enemy_block: int
 var enemy_strength: int
 var enemy_dexterity: int
 var enemy_poison: int
@@ -76,12 +78,23 @@ func card_data(copy_id: int) -> CardData:
 	return _cards[copy_id]
 
 
-func enemy_attack_damage() -> int:
+func enemy_intent() -> Dictionary:
+	var cycle := _encounter.action_cycle
+	if not cycle.is_empty():
+		var action := cycle[(round_number - 1) % cycle.size()]
+		if action != null:
+			var bonus := enemy_strength if action.kind == EnemyAction.Kind.ATTACK else 0
+			return {"kind": int(action.kind), "amount": maxi(0, action.amount) + bonus}
 	var pattern := _encounter.enemy_attack_pattern
 	var base_damage := _encounter.enemy_attack
 	if not pattern.is_empty():
 		base_damage = maxi(0, pattern[(round_number - 1) % pattern.size()])
-	return base_damage + enemy_strength
+	return {"kind": int(EnemyAction.Kind.ATTACK), "amount": base_damage + enemy_strength}
+
+
+func enemy_attack_damage() -> int:
+	var intent := enemy_intent()
+	return intent.amount if intent.kind == EnemyAction.Kind.ATTACK else 0
 
 
 func can_play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bool:
@@ -193,7 +206,11 @@ func _deal_card_damage(player: PlayerState, card: CardData, effect: CardEffect) 
 		damage += player.next_attack_bonus
 		_log("%s used their preparation for +%d Attack damage." % [player.id, player.next_attack_bonus])
 		player.next_attack_bonus = 0
-	var hp_lost := mini(enemy_hp, damage)
+	var absorbed := mini(enemy_block, maxi(0, damage))
+	if absorbed > 0:
+		enemy_block -= absorbed
+		_log("%s blocked %d damage." % [_encounter.enemy_name, absorbed])
+	var hp_lost := mini(enemy_hp, damage - absorbed)
 	enemy_hp -= hp_lost
 	_log("%s took %d damage." % [_encounter.enemy_name, hp_lost])
 
@@ -249,13 +266,39 @@ func _begin_player_phase() -> void:
 
 func _resolve_enemy_phase() -> void:
 	phase = Phase.ENEMY
+	if enemy_block > 0:
+		_log("%s lost %d remaining Block at action start." % [_encounter.enemy_name, enemy_block])
+		enemy_block = 0
 	if enemy_poison > 0:
 		enemy_hp = _take_status_damage(enemy_hp, enemy_poison, "Poison", _encounter.enemy_name)
 		enemy_poison -= 1
 		if enemy_hp == 0:
 			_resolve_victory()
 			return
-	var attack_damage := enemy_attack_damage()
+	var intent := enemy_intent()
+	var amount: int = intent.amount
+	match intent.kind:
+		EnemyAction.Kind.ATTACK:
+			_resolve_enemy_attack(amount)
+			# Provisional: a lethal enemy attack ends the encounter before its end-turn status tick.
+			if _finish_if_party_down():
+				return
+		EnemyAction.Kind.BLOCK:
+			enemy_block += amount
+			_log("%s gained %d Block." % [_encounter.enemy_name, amount])
+		EnemyAction.Kind.GAIN_STRENGTH:
+			enemy_strength += amount
+			_log("%s gained %d Strength." % [_encounter.enemy_name, amount])
+	if enemy_burning > 0:
+		enemy_hp = _take_status_damage(enemy_hp, enemy_burning, "Burning", _encounter.enemy_name)
+		enemy_burning = _remaining_burning(enemy_burning)
+		if enemy_hp == 0:
+			_resolve_victory()
+			return
+	_begin_player_phase()
+
+
+func _resolve_enemy_attack(attack_damage: int) -> void:
 	_log("%s attacks for %d damage." % [_encounter.enemy_name, attack_damage])
 	for player: PlayerState in players.values():
 		if player.hp <= 0:
@@ -269,16 +312,6 @@ func _resolve_enemy_phase() -> void:
 			_log("%s was defeated." % player.id)
 			continue
 		_apply_attack_statuses(player)
-	# Provisional: a lethal enemy attack ends the encounter before its end-turn status tick.
-	if _finish_if_party_down():
-		return
-	if enemy_burning > 0:
-		enemy_hp = _take_status_damage(enemy_hp, enemy_burning, "Burning", _encounter.enemy_name)
-		enemy_burning = _remaining_burning(enemy_burning)
-		if enemy_hp == 0:
-			_resolve_victory()
-			return
-	_begin_player_phase()
 
 
 func _apply_attack_statuses(player: PlayerState) -> void:

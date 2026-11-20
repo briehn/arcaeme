@@ -13,7 +13,9 @@ const ORIGINAL = preload("res://resources/prototype/battle_mage_run.tres")
 const SLIME = preload("res://resources/prototype/enemies/slime.tres")
 const SEATS: Array[StringName] = [&"Battle Mage 1", &"Battle Mage 2", &"Battle Mage 3", &"Battle Mage 4"]
 const SEEDS: Array[int] = [104775, 42017, 918273, 20261119, 771293]
-const DEFINING_DAMAGE := {&"goblin": 14, &"treant": 10, &"slime": 6}
+const DEFINING_DAMAGE := {
+	&"goblin": 14, &"treant": 10, &"slime": 6, &"strengthening_goblin": 14, &"defensive_treant": 10,
+}
 const RUN_VARIANTS := [
 	PacingExperiment.VariantKind.BASELINE,
 	PacingExperiment.VariantKind.TIMING,

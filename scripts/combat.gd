@@ -2,6 +2,7 @@ extends Control
 
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
+const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
 const ViewSnapshot = preload("res://scripts/combat/combat_view_snapshot.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
 const PLAYER_ID := &"Battle Mage"
@@ -96,15 +97,13 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 	player_label.text = "\n".join(stats)
 	enemy_label.text = "%s   ·   HP %d/%d" % [
 		snapshot["enemy_name"], snapshot["enemy_hp"], snapshot["enemy_max_hp"]]
+	var enemy_block: int = snapshot.get("enemy_block", 0)
+	if enemy_block > 0:
+		enemy_label.text += "   ·   Block %d" % enemy_block
 	enemy_label.text += _modifier_counters(snapshot.get("enemy_strength", 0), snapshot.get("enemy_dexterity", 0))
 	enemy_label.text += _status_counters(snapshot.get("enemy_poison", 0), snapshot.get("enemy_burning", 0))
 	if in_combat:
-		var intent := "Attack all living players for %d damage each" if coop else "Attack for %d damage"
-		enemy_label.text += "   ·   Intent: " + (intent % snapshot["enemy_attack"])
-		var poison_per_attack: int = snapshot.get("enemy_poison_per_attack", 0)
-		var burning_per_attack: int = snapshot.get("enemy_burning_per_attack", 0)
-		if poison_per_attack > 0 or burning_per_attack > 0:
-			enemy_label.text += "\nOn surviving targets" + _status_counters(poison_per_attack, burning_per_attack)
+		enemy_label.text += "   ·   Intent: " + _enemy_intent(snapshot, coop)
 	var hand: Array = snapshot["hand"]
 	cards_label.text = "Hand %d   ·   Draw pile %d   ·   Discard pile %d" % [
 		hand.size(), snapshot["draw_count"], snapshot["discard_count"]]
@@ -122,6 +121,23 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 	while _shown_log_lines < log_lines.size():
 		combat_log.add_text(log_lines[_shown_log_lines] + "\n")
 		_shown_log_lines += 1
+
+
+func _enemy_intent(snapshot: Dictionary, coop: bool) -> String:
+	var intent: Dictionary = snapshot.get("enemy_intent", {})
+	var amount: int = intent.get("amount", snapshot.get("enemy_attack", 0))
+	match intent.get("kind", EnemyAction.Kind.ATTACK):
+		EnemyAction.Kind.BLOCK:
+			return "Gain %d Block" % amount
+		EnemyAction.Kind.GAIN_STRENGTH:
+			return "Gain %d Strength" % amount
+	var attack := "Attack all living players for %d damage each" if coop else "Attack for %d damage"
+	var description := attack % amount
+	var poison_per_attack: int = snapshot.get("enemy_poison_per_attack", 0)
+	var burning_per_attack: int = snapshot.get("enemy_burning_per_attack", 0)
+	if poison_per_attack > 0 or burning_per_attack > 0:
+		description += "\nOn surviving targets" + _status_counters(poison_per_attack, burning_per_attack)
+	return description
 
 
 func _player_stats(player: Dictionary, show_turn_status: bool, phase: int) -> String:

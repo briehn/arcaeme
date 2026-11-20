@@ -1,6 +1,7 @@
 extends Control
 
 const CombatView = preload("res://scripts/combat.gd")
+const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 const EnemyPlaytestSelector = preload("res://scripts/ui/enemy_playtest_selector.gd")
 const CardExpansionPlaytest = preload("res://scripts/run/card_expansion_playtest.gd")
@@ -10,6 +11,12 @@ const LOCAL_COOP_SCENE = preload("res://scenes/local_coop.tscn")
 
 @onready var enemy_playtest: EnemyPlaytestSelector = %EnemyPlaytest
 @onready var card_expansion: CheckBox = %CardExpansion
+
+var _enemy_local_coop_button: Button
+
+
+func _ready() -> void:
+	enemy_playtest.item_selected.connect(_on_enemy_playtest_selected)
 
 
 func _on_button_pressed() -> void:
@@ -28,7 +35,13 @@ func _on_start_enemy_variety_run_pressed() -> void:
 
 
 func _on_start_local_coop_pressed() -> void:
+	_start_local_coop()
+
+
+func _start_local_coop(encounter: EncounterData = null) -> void:
 	var combat: CombatView = LOCAL_COOP_SCENE.instantiate()
+	if encounter != null:
+		combat.encounter = encounter
 	if card_expansion.button_pressed:
 		combat.encounter = CardExpansionPlaytest.with_expansion_deck(combat.encounter)
 	get_tree().change_scene_to_node(combat)
@@ -52,3 +65,23 @@ func _on_start_enemy_playtest_pressed() -> void:
 	if card_expansion.button_pressed:
 		combat.encounter = CardExpansionPlaytest.with_expansion_deck(combat.encounter)
 	get_tree().change_scene_to_node(combat)
+
+
+func _on_enemy_playtest_selected(_index: int) -> void:
+	if enemy_playtest.tactical_encounter_selected():
+		if _enemy_local_coop_button == null:
+			_enemy_local_coop_button = Button.new()
+			_enemy_local_coop_button.name = "StartEnemyLocalCoopButton"
+			_enemy_local_coop_button.text = "Start Local Co-op"
+			_enemy_local_coop_button.pressed.connect(_on_start_enemy_local_coop_pressed)
+			enemy_playtest.get_parent().add_child(_enemy_local_coop_button)
+			_enemy_local_coop_button.owner = self
+			_enemy_local_coop_button.unique_name_in_owner = true
+	elif _enemy_local_coop_button != null:
+		enemy_playtest.get_parent().remove_child(_enemy_local_coop_button)
+		_enemy_local_coop_button.queue_free()
+		_enemy_local_coop_button = null
+
+
+func _on_start_enemy_local_coop_pressed() -> void:
+	_start_local_coop(enemy_playtest.selected_encounter())
