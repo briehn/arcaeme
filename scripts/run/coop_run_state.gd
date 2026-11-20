@@ -4,12 +4,14 @@ const CardData = preload("res://scripts/combat/card_data.gd")
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const MajorArcana = preload("res://scripts/run/major_arcana.gd")
+const PortalRoute = preload("res://scripts/run/portal_route.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 
 const OPENING := "opening"
 const ARCANA := "arcana"
 const INTERMEDIATE := "intermediate"
 const REWARD := "reward"
+const PORTAL := "portal"
 const BOSS := "boss"
 const VICTORY := "victory"
 const DEFEAT := "defeat"
@@ -26,6 +28,8 @@ var _current_hps: Dictionary[StringName, int] = {}
 var _reward_choices: Dictionary[StringName, Array] = {}
 var _arcana_offers: Dictionary[StringName, Array] = {}
 var _arcana_choices: Dictionary[StringName, StringName] = {}
+var _portal_choices: Dictionary[StringName, StringName] = {}
+var _portal_route: PortalRoute
 var _reward_ready := 0
 var _offers: Array[CardData]
 var _rng := RandomNumberGenerator.new()
@@ -36,6 +40,8 @@ func _init(data: RunData, player_ids: Array[StringName], offer_seed: Variant = n
 	_player_ids = player_ids.duplicate()
 	_rng.seed = data.run_seed
 	_offers = data.eligible_rewards(RunData.BATTLE_MAGE)
+	if data.portal_enabled:
+		_portal_route = PortalRoute.new(data.run_seed)
 	for player_id in _player_ids:
 		_decks[player_id] = data.starting_deck.duplicate()
 		_current_hps[player_id] = data.player_max_hp
@@ -68,7 +74,7 @@ func submit_arcana(player_id: StringName, id: StringName) -> bool:
 
 
 func observe_combat_result() -> void:
-	if active_combat == null or stage == REWARD or stage == VICTORY or stage == DEFEAT:
+	if active_combat == null or stage in [REWARD, PORTAL, VICTORY, DEFEAT]:
 		return
 	match active_combat.phase:
 		CombatState.Phase.DEFEAT:
@@ -101,7 +107,7 @@ func submit_reward(player_id: StringName, card_id: StringName) -> bool:
 			or _reward_choices[player_id].size() != encounter_id - 1):
 		return false
 	var next := _data.encounter_after(encounter_id)
-	if next == null:
+	if _portal_route == null and next == null:
 		return false
 	if card_id != &"":
 		var reward: CardData
@@ -115,8 +121,29 @@ func submit_reward(player_id: StringName, card_id: StringName) -> bool:
 	_reward_choices[player_id].append(card_id)
 	_reward_ready += 1
 	if _reward_ready == _player_ids.size():
-		stage = BOSS if encounter_id + 1 == _data.encounter_count() else INTERMEDIATE
-		_start_encounter(next)
+		if _portal_route != null:
+			stage = PORTAL
+		else:
+			stage = BOSS if encounter_id + 1 == _data.encounter_count() else INTERMEDIATE
+			_start_encounter(next)
+	return true
+
+
+func submit_portal(player_id: StringName, id: StringName) -> bool:
+	if stage != PORTAL or not _decks.has(player_id) or _portal_choices.has(player_id):
+		return false
+	var source_id := active_encounter.enemy_id
+	if _portal_route.destination(source_id, id) == null:
+		return false
+	_portal_choices[player_id] = id
+	if _portal_choices.size() == _player_ids.size():
+		# Slot order makes the seeded draw independent of RPC arrival order.
+		var choices: Array[StringName] = []
+		for seat in _player_ids:
+			choices.append(_portal_choices[seat])
+		var chosen := _portal_route.destination(source_id, _portal_route.resolve(choices))
+		stage = BOSS if chosen.enemy_id == PortalRoute.BOSS else INTERMEDIATE
+		_start_encounter(chosen)
 	return true
 
 
@@ -148,6 +175,14 @@ func view_fields(player_id: StringName) -> Dictionary:
 			"reward_ready": _reward_ready, "reward_submitted": submitted, "reward_options": options,
 			"next_encounter_name": next.enemy_name if next != null else "",
 		})
+		if _portal_route != null:
+			view["portal_after_reward"] = true
+	elif stage == PORTAL:
+		view.merge({
+			"portal_options": _portal_route.options(active_encounter.enemy_id),
+			"portal_ready": _portal_choices.size(),
+			"portal_submitted": _portal_choices.has(player_id),
+		})
 	return view
 
 
@@ -158,4 +193,5 @@ func _start_encounter(definition: EncounterData) -> void:
 	active_combat = CombatState.new(active_encounter, active_encounter.shuffle_seed,
 		_player_ids, -1, _decks, _current_hps, _arcana_choices)
 	_reward_ready = 0
+	_portal_choices.clear()
 	encounter_id += 1

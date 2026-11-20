@@ -6,7 +6,7 @@ const ViewSnapshot = preload("res://scripts/combat/combat_view_snapshot.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
 
-enum Command { PLAY_CARD, END_TURN, REWARD, UNDO_READY, ARCANA }
+enum Command { PLAY_CARD, END_TURN, REWARD, UNDO_READY, ARCANA, PORTAL }
 enum Result { ACCEPTED, UNKNOWN_PEER, MALFORMED, WRONG_PLAYER, DUPLICATE, STALE_TURN, ILLEGAL_ACTION }
 
 var _encounter: EncounterData
@@ -76,6 +76,13 @@ func submit(peer_id: int, request: Variant) -> Result:
 		_state = _run.active_combat
 		_run_revision += 1
 		return Result.ACCEPTED
+	if request["kind"] == Command.PORTAL:
+		if not _run.submit_portal(player_id, StringName(request["portal_id"])):
+			return Result.ILLEGAL_ACTION
+		_encounter = _run.active_encounter
+		_state = _run.active_combat
+		_run_revision += 1
+		return Result.ACCEPTED
 	# A different seat's accepted action need not invalidate a current play. A change
 	# in this seat's readiness does invalidate commands that preceded that change.
 	if (request["round"] != _state.round_number or request["phase"] != _state.phase
@@ -116,6 +123,8 @@ func _valid_shape(request: Dictionary) -> bool:
 		return false
 	if request["kind"] == Command.REWARD:
 		return _run != null and request.size() == 5 and request.get("reward_id") is String
+	if request["kind"] == Command.PORTAL:
+		return _run != null and request.size() == 5 and request.get("portal_id") is String
 	if not request.get("round") is int or request["round"] <= 0 or not request.get("phase") is int:
 		return false
 	if not request.get("ready_epoch") is int or request["ready_epoch"] < 0:

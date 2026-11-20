@@ -218,6 +218,12 @@ layout_mode = 2
 text = "Start Prototype Run"
 alignment = 0
 
+[node name="PortalPrototype" type="CheckBox" parent="ContentPanel/MenuScroll/Pages/PrototypeNavigation"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Enable branching portals for solo and local Multi-Enemy Short Runs. Return to the main menu to start either run."
+text = "Portal Routes (Prototype)"
+
 [node name="StartEnemyVarietyRunButton" type="Button" parent="ContentPanel/MenuScroll/Pages/PrototypeNavigation"]
 unique_name_in_owner = true
 layout_mode = 2

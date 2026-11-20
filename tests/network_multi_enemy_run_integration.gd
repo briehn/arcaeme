@@ -4,10 +4,20 @@ const Authority = preload("res://scripts/network/network_combat_authority.gd")
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
 const NetworkSession = preload("res://scripts/network/network_coop_session.gd")
+const PortalRoute = preload("res://scripts/run/portal_route.gd")
 const RUN = preload("res://resources/prototype/multi_enemy_run.tres")
 const NAMES := ["Two Slimes", "Goblin + Treant", "Citadel Warden"]
 const IDS := [["slime_1", "slime_2"], ["goblin", "treant"], ["citadel_warden"]]
 const REWARDS := ["shieldstrike", "arcane_reversal", "arcane_guard"]
+const PORTAL_FIGHTS := {
+	&"two_slimes": ["Two Slimes", ["slime_1", "slime_2"]],
+	&"goblin_treant": ["Goblin + Treant", ["goblin", "treant"]],
+	&"three_enemies": ["Three Enemies", ["slime", "goblin", "treant"]],
+	&"slime": ["Slime", ["slime"]],
+	&"goblin": ["Goblin", ["goblin"]],
+	&"treant": ["Treant", ["treant"]],
+	&"citadel_warden": ["Citadel Warden", ["citadel_warden"]],
+}
 
 var _session: NetworkSession
 var _seat: int
@@ -34,6 +44,14 @@ var _arcana_choice := ""
 var _arcana_ready_seen: Array[int] = []
 var _arcana_probes := 0
 var _probed_old_arcana := false
+var _with_portals := false
+var _encounter_count := 3
+var _portal_route: PortalRoute
+var _portal_source := PortalRoute.START
+var _portal_options: Array = []
+var _portal_ready_seen: Dictionary[int, int] = {}
+var _portal_probes := 0
+var _probed_old_portal := false
 
 
 func _initialize() -> void:
@@ -42,10 +60,14 @@ func _initialize() -> void:
 
 func _start() -> void:
 	var args := OS.get_cmdline_user_args()
-	if args.size() != 4 and (args.size() != 5 or args[4] != "MajorArcana"):
-		_fail("Expected UDP port, party size, seat, release path and optional MajorArcana.")
+	if args.size() != 4 and (args.size() != 5 or args[4] not in ["MajorArcana", "Portals"]):
+		_fail("Expected UDP port, party size, seat, release path and optional MajorArcana or Portals.")
 		return
 	_with_arcana = args.size() == 5
+	_with_portals = args.size() == 5 and args[4] == "Portals"
+	if _with_portals:
+		_encounter_count = 4
+		_portal_route = PortalRoute.new(RUN.run_seed)
 	_size = int(args[1])
 	_seat = int(args[2])
 	_actor = "Battle Mage %d" % _seat
@@ -78,6 +100,12 @@ func _start() -> void:
 				_fail("Major Arcana must be selectable and opt-in for the multi-enemy route.")
 				return
 			arcana.button_pressed = true
+		if _with_portals:
+			var portals: CheckBox = current_scene.get_node("%PortalPrototype")
+			if portals.button_pressed or portals.disabled or not portals.is_visible_in_tree():
+				_fail("The portal prototype must be selectable and opt-in.")
+				return
+			portals.button_pressed = true
 		if (current_scene.get_node("%HostButton") as Button).text != "Host Multi-Enemy Short Run":
 			_fail("The lobby did not identify the selected run.")
 			return
@@ -115,6 +143,7 @@ func _observe() -> void:
 		"revision": view.revision, "ready": view.get("reward_ready"),
 		"next_encounter": view.get("next_encounter_name"),
 		"arcana_ready": view.get("arcana_ready"),
+		"portal_ready": view.get("portal_ready"), "portals": view.get("portal_options"),
 	}).sha256_text())
 	if view.run_stage in ["victory", "defeat"]:
 		_report(view)
@@ -124,22 +153,26 @@ func _verify(view: Dictionary) -> bool:
 	if view.run_stage == "arcana":
 		return _verify_arcana_selection(view)
 	var encounter: int = view.encounter_id
-	if (encounter < 1 or encounter > 3 or view.encounter_count != 3 or view.run_title != RUN.title
+	if (encounter < 1 or encounter > _encounter_count or view.encounter_count != _encounter_count or view.run_title != RUN.title
 			or view.viewer != _actor or view.players.size() != _size or view.has("seed")
 			or view.has("reward_offers_by_player") or view.run_deck_count != _deck.size()
 			or view.has("arcana_options") or view.get("arcana", {}).get("id", "") != _arcana_choice):
 		return false
+	if _with_portals and encounter > 1 and encounter not in _started and not _check_portal_arrival():
+		return false
 	var stage_label: Label = current_scene.get_node("%RunStage")
-	if ("Encounter %d of 3" % encounter not in stage_label.text
+	if ("Encounter %d of %d" % [encounter, _encounter_count] not in stage_label.text
 			or (view.run_stage == "boss" and "Boss: Citadel Warden" not in stage_label.text)):
 		return false
 	var enemies: Array = view.enemies
-	if enemies.size() != IDS[encounter - 1].size() or view.enemy_name != NAMES[encounter - 1]:
+	var enemy_ids: Array = PORTAL_FIGHTS[_portal_source][1] if _with_portals else IDS[encounter - 1]
+	var expected_name: String = PORTAL_FIGHTS[_portal_source][0] if _with_portals else NAMES[encounter - 1]
+	if enemies.size() != enemy_ids.size() or view.enemy_name != expected_name:
 		return false
 	var living := 0
 	for index in enemies.size():
 		var enemy: Dictionary = enemies[index]
-		if enemy.id != IDS[encounter - 1][index] or enemy.alive == enemy.intent.is_empty():
+		if enemy.id != enemy_ids[index] or enemy.alive == enemy.intent.is_empty():
 			return false
 		living += int(enemy.alive)
 	for player in view.players:
@@ -149,7 +182,7 @@ func _verify(view: Dictionary) -> bool:
 	for card in view.hand:
 		if card.copy < 0 or card.copy >= _deck.size() or card.id != _deck[card.copy]:
 			return false
-	if encounter < 3 and living == 1:
+	if enemies.size() > 1 and living == 1:
 		if view.run_stage == "reward" or view.phase == CombatState.Phase.VICTORY:
 			return false
 		if encounter not in _partial_seen:
@@ -157,6 +190,10 @@ func _verify(view: Dictionary) -> bool:
 	if view.run_stage == "reward":
 		return _verify_reward(view, living)
 	if view.has("reward_options") or view.has("reward_submitted"):
+		return false
+	if view.run_stage == "portal":
+		return _verify_portal(view, living)
+	if view.has("portal_options") or view.has("portal_ready") or view.has("portal_submitted"):
 		return false
 	if encounter not in _started:
 		return _verify_start(view)
@@ -201,7 +238,7 @@ func _verify_arcana_selection(view: Dictionary) -> bool:
 
 func _verify_start(view: Dictionary) -> bool:
 	var encounter: int = view.encounter_id
-	var stage: String = ["opening", "intermediate", "boss"][encounter - 1]
+	var stage := "opening" if encounter == 1 else ("boss" if encounter == _encounter_count else "intermediate")
 	if (encounter != _started.size() + 1 or view.revision != 0 or view.round != 1
 			or view.run_stage != stage or view.ready_epoch != 0 or view.hand.size() != 5):
 		return false
@@ -226,8 +263,12 @@ func _verify_start(view: Dictionary) -> bool:
 
 func _verify_reward(view: Dictionary, living: int) -> bool:
 	var encounter: int = view.encounter_id
-	if (encounter > 2 or living != 0 or view.phase != CombatState.Phase.VICTORY
-			or view.next_encounter_name != NAMES[encounter] or view.reward_ready >= _size):
+	if (encounter >= _encounter_count or living != 0 or view.phase != CombatState.Phase.VICTORY
+			or view.reward_ready >= _size or view.has("portal_options")):
+		return false
+	if _with_portals and (not view.get("portal_after_reward", false) or view.next_encounter_name != ""):
+		return false
+	if not _with_portals and view.next_encounter_name != NAMES[encounter]:
 		return false
 	var progress: Label = current_scene.get_node("%RewardProgress")
 	var choices := current_scene.get_node("%RewardChoices")
@@ -249,6 +290,55 @@ func _verify_reward(view: Dictionary, living: int) -> bool:
 	return reward_ids == PackedStringArray(REWARDS)
 
 
+func _verify_portal(view: Dictionary, living: int) -> bool:
+	if (not _with_portals or living != 0 or view.phase != CombatState.Phase.VICTORY
+			or view.portal_ready != _portal_ready_seen.get(view.encounter_id, 0)
+			or view.portal_options != _portal_route.options(_portal_source)
+			or view.portal_options.size() != (1 if view.encounter_id == 3 else 2)
+			or (current_scene.get_node("%CombatSlot") as Control).visible):
+		return false
+	_portal_options = view.portal_options
+	_portal_ready_seen[view.encounter_id] = view.portal_ready + 1
+	var heading: Label = current_scene.get_node("%RunStage")
+	var progress: Label = current_scene.get_node("%RewardProgress")
+	var choices := current_scene.get_node("%RewardChoices")
+	if ("Choose a Portal" not in heading.text or "%d/%d" % [view.portal_ready, _size] not in progress.text
+			or (current_scene.get_node("%SkipReward") as Button).visible):
+		return false
+	if view.portal_submitted:
+		return true
+	if choices.get_child_count() != view.portal_options.size():
+		return false
+	for index in view.portal_options.size():
+		var portal: Dictionary = view.portal_options[index]
+		var button: Button = choices.get_child(index)
+		if button.get_meta("portal_id", "") != portal.id or portal.name not in button.text:
+			return false
+		for branch in portal.branches:
+			if branch.name not in button.text:
+				return false
+	return true
+
+
+func _check_portal_arrival() -> bool:
+	if _portal_options.is_empty():
+		return false
+	var entries: Array[StringName] = []
+	for seat in range(1, _size + 1):
+		entries.append(StringName(_portal_choice_for(seat).id))
+	var chosen := _portal_route.resolve(entries)
+	for option in _portal_options:
+		if StringName(option.id) == chosen:
+			_portal_source = StringName(option.destination_id)
+			_portal_options = []
+			return true
+	return false
+
+
+func _portal_choice_for(seat: int) -> Dictionary:
+	return _portal_options[-1] if seat == _size else _portal_options[0]
+
+
 func _drive() -> void:
 	if not _session.can_submit() or _probe_result >= 0:
 		return
@@ -258,6 +348,9 @@ func _drive() -> void:
 		return
 	if view.run_stage == "reward":
 		_drive_reward(view)
+		return
+	if view.run_stage == "portal":
+		_drive_portal(view)
 		return
 	if view.encounter_id == 1 and view.revision < 3:
 		if _seat == 2:
@@ -333,6 +426,30 @@ func _drive_reward(view: Dictionary) -> void:
 		(current_scene.get_node("%SkipReward") as Button).pressed.emit()
 
 
+func _drive_portal(view: Dictionary) -> void:
+	if view.portal_ready != _seat - 1 or view.portal_submitted:
+		return
+	if _seat == 2 and view.encounter_id == 1 and _portal_probes < 2:
+		_portal_probes += 1
+		if _portal_probes == 1:
+			_probe(view, Authority.Result.WRONG_PLAYER, Authority.Command.PORTAL,
+				{"actor": "Battle Mage 1", "portal_id": _portal_options[0].id})
+		else:
+			_probe(view, Authority.Result.ILLEGAL_ACTION, Authority.Command.PORTAL, {"portal_id": "unoffered"})
+		return
+	if _seat == 2 and view.encounter_id == 2 and not _probed_old_portal:
+		_probed_old_portal = true
+		_probe(view, Authority.Result.STALE_TURN, Authority.Command.PORTAL,
+			{"encounter_id": 1, "portal_id": _portal_options[0].id})
+		return
+	var chosen := _portal_choice_for(_seat)
+	for button: Button in current_scene.get_node("%RewardChoices").get_children():
+		if button.get_meta("portal_id", "") == chosen.id:
+			button.pressed.emit()
+			return
+	_fail("No menu action matched the scheduled portal vote.")
+
+
 func _is_active_seat(view: Dictionary) -> bool:
 	for offset in _size:
 		var player: Dictionary = view.players[(offset + view.round - 1) % _size]
@@ -393,7 +510,8 @@ func _play(view: Dictionary, copy_id: int, target := "") -> void:
 		_fail("Selecting a card submitted a command before choosing an enemy.")
 		return
 	var targets := combat.get_node("%EnemyTargets")
-	var target_position: int = IDS[view.encounter_id - 1].find(target)
+	var enemy_ids: Array = PORTAL_FIGHTS[_portal_source][1] if _with_portals else IDS[view.encounter_id - 1]
+	var target_position := enemy_ids.find(target)
 	var enemy_button := targets.get_child(target_position) as Button
 	if enemy_button.disabled:
 		_fail("The intended living enemy is not selectable.")
@@ -408,7 +526,7 @@ func _probe(view: Dictionary, result: int, kind: Authority.Command, fields: Dict
 	_session._next_sequence += 1
 	var request := {"actor": view.viewer, "sequence": _session._next_sequence,
 		"kind": int(kind), "encounter_id": view.encounter_id}
-	if kind not in [Authority.Command.REWARD, Authority.Command.ARCANA]:
+	if kind not in [Authority.Command.REWARD, Authority.Command.ARCANA, Authority.Command.PORTAL]:
 		request.merge({"round": view.round, "phase": view.phase, "ready_epoch": view.ready_epoch})
 	request.merge(fields, true)
 	if _session.rpc_id(NetworkSession.SERVER_ID, &"_request_command", request) != OK:
@@ -450,16 +568,23 @@ func _combat() -> Node:
 
 func _report(view: Dictionary) -> void:
 	var stage_label: Label = current_scene.get_node("%RunStage")
+	var stages := [1, 2, 3, 4] if _with_portals else [1, 2, 3]
+	var rewards := [1, 2, 3] if _with_portals else [1, 2]
+	if _with_portals and (_portal_ready_seen != {1: _size, 2: _size, 3: _size}
+			or (_seat == 2 and (_portal_probes != 2 or not _probed_old_portal))):
+		_fail("The run ended without all portal gates or authority checks.")
+		return
 	if (view.run_stage != "victory" or "Run Victory" not in stage_label.text
-			or _started != [1, 2, 3] or _rewards_seen != [1, 2]
+			or _started != stages or _rewards_seen != rewards
 			or _partial_seen != [1, 2] or (_seat == 2 and (not _probed_target or not _probed_old_reward))
 			or (_with_arcana and (_arcana_ready_seen.size() != _size
 				or (_seat == 2 and (_arcana_probes != 2 or not _probed_old_arcana))))):
 		_fail("The run ended without exercising every required encounter, reward, and result.")
 		return
 	_finished = true
-	print("RESULT Multi-Enemy Short Run Victory · %d public revisions · %s" %
-		[_public_digests.size(), "\n".join(_public_digests).sha256_text()])
+	var label := "Portal Short Run Victory" if _with_portals else "Multi-Enemy Short Run Victory"
+	print("RESULT %s · %d public revisions · %s" %
+		[label, _public_digests.size(), "\n".join(_public_digests).sha256_text()])
 	while not FileAccess.file_exists(_release_path):
 		await create_timer(0.04).timeout
 	quit()

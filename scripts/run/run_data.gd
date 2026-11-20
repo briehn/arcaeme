@@ -15,14 +15,17 @@ const BATTLE_MAGE := &"battle_mage"
 @export var boss_encounter: EncounterData
 @export var reward_candidates: Array[CardData] = []
 @export var major_arcana_enabled := false
+@export var portal_enabled := false
 
 
 func encounter_count() -> int:
+	if portal_enabled:
+		return 4
 	return intermediate_encounters.size() + 2
 
 
 func encounter_after(encounter_id: int) -> EncounterData:
-	if encounter_id < 1 or encounter_id >= encounter_count():
+	if portal_enabled or encounter_id < 1 or encounter_id >= encounter_count():
 		return null
 	if encounter_id <= intermediate_encounters.size():
 		return intermediate_encounters[encounter_id - 1]

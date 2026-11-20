@@ -8,6 +8,7 @@ const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const MajorArcana = preload("res://scripts/run/major_arcana.gd")
 const PacingExperiment = preload("res://scripts/run/pacing_experiment.gd")
 const PacingVariantPicker = preload("res://scripts/ui/pacing_variant_picker.gd")
+const PortalChoiceButton = preload("res://scripts/ui/portal_choice_button.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const RunState = preload("res://scripts/run/run_state.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
@@ -69,6 +70,8 @@ func _render_panel(focus_choice := true) -> void:
 func _render_solo_panel() -> void:
 	pacing_controls.visible = enable_pacing_variants and _run.stage == RunState.Stage.ROUTE
 	message.text = ""
+	deck_title.visible = _run.stage != RunState.Stage.PORTAL
+	deck_list.visible = deck_title.visible
 	match _run.stage:
 		RunState.Stage.ARCANA:
 			heading.text = "Choose a Major Arcana"
@@ -77,7 +80,9 @@ func _render_solo_panel() -> void:
 		RunState.Stage.ROUTE:
 			heading.text = "Choose an opening encounter"
 			message.text = "Provisional encounter stats"
-			if _multi_enemy_route():
+			if run_data.portal_enabled:
+				heading.text = "Begin the portal route"
+			elif _multi_enemy_route():
 				heading.text = "Choose to begin the fixed route"
 			for encounter in run_data.opening_encounters:
 				_add_choice("%s\n%s" % [encounter.enemy_name, _encounter_preview(encounter)],
@@ -85,12 +90,18 @@ func _render_solo_panel() -> void:
 		RunState.Stage.REWARD:
 			heading.text = "Choose a card reward"
 			message.text = "Choose one provisional Battle Mage card for this run, or skip."
-			if _multi_enemy_route():
+			if run_data.portal_enabled:
+				message.text += " The portals open after your reward decision."
+			elif _multi_enemy_route():
 				message.text += " Next encounter: %s." % _run.next_encounter().enemy_name
 			for card in _run.reward_options():
 				_add_choice("%s  ·  %d Mana\n%s" % [card.display_name, card.mana_cost, card.description()],
 					_take_reward.bind(card.id))
 			_add_choice("Skip Reward", _skip_reward)
+		RunState.Stage.PORTAL:
+			heading.text = "Choose a Portal"
+			message.text = "The portals here lead to your next encounter. Each preview shows one step ahead."
+			_add_portal_choices(_run.portal_options(), _submit_solo_portal)
 		RunState.Stage.NEXT_READY, RunState.Stage.BOSS_READY:
 			heading.text = "Ready for the boss" if run_data.title.is_empty() else "Ready for the final encounter"
 			var next := _run.next_encounter()
@@ -108,8 +119,9 @@ func _render_solo_panel() -> void:
 	run_status.text = "Battle Mage  ·  HP %d/%d  ·  Run seed %d" % [_run.current_hp, _run.max_hp, _run.run_seed]
 	if _multi_enemy_route() and _run.encounter_id > 0:
 		run_status.text += "  ·  " + _encounter_title(_run.encounter_id, _run.active_encounter)
-	_append_arcana_name(_run.selected_arcana)
-	_render_deck(_run.deck_cards())
+	if _run.stage != RunState.Stage.PORTAL:
+		_append_arcana_name(_run.selected_arcana)
+		_render_deck(_run.deck_cards())
 
 
 func _render_local_panel() -> void:
@@ -127,9 +139,11 @@ func _render_local_panel() -> void:
 		CoopRunState.REWARD:
 			var player := LOCAL_MAGES[_local_choice_index]
 			var view := _local_run.view_fields(player)
+			var transition := (" The portals open after everyone's reward decision." if view.get("portal_after_reward", false)
+				else " Next: %s." % view.next_encounter_name)
 			heading.text = "Card reward  ·  %d/%d decisions submitted" % [view.reward_ready, LOCAL_MAGES.size()]
 			if _local_choice_revealed:
-				message.text = "%s: choose a Battle Mage card or skip. Next: %s." % [player, view.next_encounter_name]
+				message.text = "%s: choose a Battle Mage card or skip." % player + transition
 				_append_arcana_name(_local_run.selected_arcana(player))
 				deck_title.show()
 				deck_list.show()
@@ -139,8 +153,14 @@ func _render_local_panel() -> void:
 						_submit_local_reward.bind(StringName(card.id), player, _local_run.encounter_id))
 				_add_choice("Skip Reward", _submit_local_reward.bind(&"", player, _local_run.encounter_id))
 			else:
-				message.text = "Pass controls to %s. Next: %s." % [player, view.next_encounter_name]
+				message.text = "Pass controls to %s." % player + transition
 				_add_choice("Show %s Reward" % player, _show_local_choice.bind(player, _local_run.encounter_id, CoopRunState.REWARD))
+		CoopRunState.PORTAL:
+			var player := LOCAL_MAGES[_local_choice_index]
+			var view := _local_run.view_fields(player)
+			heading.text = "Choose a Portal  ·  %d/%d decisions submitted" % [view.portal_ready, LOCAL_MAGES.size()]
+			message.text = "%s: select a portal. One Mage's choice is drawn after everyone submits." % player
+			_add_portal_choices(view.portal_options, _submit_local_portal.bind(player, _local_run.encounter_id))
 		CoopRunState.VICTORY:
 			heading.text = "Run Victory"
 			message.text = "Your party defeated %s and completed the prototype run." % _local_run.active_encounter.enemy_name
@@ -166,6 +186,13 @@ func _add_arcana_choices(options: Array, submit: Callable) -> void:
 	for option: Dictionary in options:
 		_add_choice("%s\n%s" % [option.name, option.description], submit.bind(StringName(option.id)))
 	_add_choice("Skip Arcana", submit.bind(&""))
+
+
+func _add_portal_choices(options: Array, submit: Callable) -> void:
+	for option: Dictionary in options:
+		var button := PortalChoiceButton.make(option)
+		button.pressed.connect(submit.bind(StringName(option.id)))
+		choices.add_child(button)
 
 
 func _append_arcana_name(id: StringName) -> void:
@@ -201,6 +228,18 @@ func _submit_local_reward(card_id: StringName, player: StringName, encounter_id:
 	_advance_local_choice(CoopRunState.REWARD)
 
 
+func _submit_solo_portal(portal_id: StringName) -> void:
+	if _run.submit_portal(portal_id):
+		_show_solo_combat("Encounter")
+
+
+func _submit_local_portal(portal_id: StringName, player: StringName, encounter_id: int) -> void:
+	if (_local_run.stage != CoopRunState.PORTAL or _local_run.encounter_id != encounter_id
+			or LOCAL_MAGES[_local_choice_index] != player or not _local_run.submit_portal(player, portal_id)):
+		return
+	_advance_local_choice(CoopRunState.PORTAL)
+
+
 func _advance_local_choice(stage: String) -> void:
 	_local_choice_revealed = false
 	if _local_run.stage == stage:
@@ -208,7 +247,10 @@ func _advance_local_choice(stage: String) -> void:
 		_render_panel()
 	else:
 		_local_choice_index = 0
-		_show_local_combat()
+		if _local_run.stage == CoopRunState.PORTAL:
+			_render_panel()
+		else:
+			_show_local_combat()
 
 
 func _on_pacing_variant_selected(_index: int) -> void:

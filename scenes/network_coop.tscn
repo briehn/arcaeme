@@ -96,6 +96,13 @@ layout_mode = 2
 disabled = true
 text = "Major Arcana (Prototype)"
 
+[node name="PortalPrototype" type="CheckBox" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+disabled = true
+text = "Portal Routes (Prototype)"
+
 [node name="PacingControls" type="HBoxContainer" parent="Layout/ConnectionMargin/Connection/Controls"]
 unique_name_in_owner = true
 visible = false

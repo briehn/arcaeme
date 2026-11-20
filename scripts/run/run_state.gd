@@ -4,11 +4,12 @@ const CardData = preload("res://scripts/combat/card_data.gd")
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const MajorArcana = preload("res://scripts/run/major_arcana.gd")
+const PortalRoute = preload("res://scripts/run/portal_route.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 
 enum Stage {
 	ROUTE, OPENING_COMBAT, REWARD, BOSS_READY, BOSS_COMBAT, VICTORY, DEFEAT,
-	NEXT_READY, INTERMEDIATE_COMBAT, ARCANA,
+	NEXT_READY, INTERMEDIATE_COMBAT, ARCANA, PORTAL,
 }
 
 const PLAYER_ID := &"Battle Mage"
@@ -30,6 +31,7 @@ var _eligible_rewards: Array[CardData] = []
 var _reward_choices: Array[StringName] = []
 var _arcana_offers: Array[StringName] = []
 var _rng := RandomNumberGenerator.new()
+var _portal_route: PortalRoute
 
 
 func _init(data: RunData) -> void:
@@ -40,6 +42,8 @@ func _init(data: RunData) -> void:
 	current_hp = max_hp
 	_deck = data.starting_deck.duplicate()
 	_eligible_rewards = data.eligible_rewards(PLAYER_CLASS)
+	if data.portal_enabled:
+		_portal_route = PortalRoute.new(run_seed)
 	if data.major_arcana_enabled:
 		_arcana_offers = MajorArcana.offers(run_seed, 0, PLAYER_CLASS)
 		stage = Stage.ARCANA
@@ -77,6 +81,8 @@ func reward_choices() -> Array[StringName]:
 
 func choose_opening(opening_id: StringName) -> bool:
 	if stage != Stage.ROUTE:
+		return false
+	if _portal_route != null and opening_id != PortalRoute.START:
 		return false
 	for encounter in _data.opening_encounters:
 		if encounter != null and encounter.enemy_id == opening_id:
@@ -140,10 +146,30 @@ func start_next_encounter() -> bool:
 	return true
 
 
+func portal_options() -> Array[Dictionary]:
+	if stage != Stage.PORTAL:
+		return []
+	return _portal_route.options(active_encounter.enemy_id)
+
+
+func submit_portal(id: StringName) -> bool:
+	if stage != Stage.PORTAL:
+		return false
+	var destination := _portal_route.destination(active_encounter.enemy_id, id)
+	if destination == null:
+		return false
+	_start_combat(destination,
+		Stage.BOSS_COMBAT if destination.enemy_id == PortalRoute.BOSS else Stage.INTERMEDIATE_COMBAT)
+	return true
+
+
 func _finish_reward(card: CardData) -> void:
 	selected_reward = card
 	_reward_choices.append(card.id if card != null else &"")
-	stage = Stage.BOSS_READY if encounter_id + 1 == _data.encounter_count() else Stage.NEXT_READY
+	if _portal_route != null:
+		stage = Stage.PORTAL
+	else:
+		stage = Stage.BOSS_READY if encounter_id + 1 == _data.encounter_count() else Stage.NEXT_READY
 
 
 func _start_combat(definition: EncounterData, next_stage: Stage) -> void:

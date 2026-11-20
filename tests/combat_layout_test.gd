@@ -2,6 +2,7 @@ extends SceneTree
 
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const MajorArcana = preload("res://scripts/run/major_arcana.gd")
+const PortalRoute = preload("res://scripts/run/portal_route.gd")
 const NetworkSession = preload("res://scripts/network/network_coop_session.gd")
 const ViewSnapshot = preload("res://scripts/combat/combat_view_snapshot.gd")
 const MAIN = preload("res://scenes/main.tscn")
@@ -48,6 +49,8 @@ func _run() -> void:
 		await _test_solo_run()
 		await _test_multi_enemy_run(false)
 		await _test_multi_enemy_run(true)
+		await _test_portal_run(false)
+		await _test_portal_run(true)
 		await _test_arcana_run(false)
 		await _test_arcana_run(true)
 		await _test_network()
@@ -79,6 +82,8 @@ func _test_menu() -> void:
 	var back := _control(menu, "%BackFromTools")
 	var tools := _control(menu, "%PrototypeNavigation")
 	_check(not primary.visible and tools.visible and back.has_focus(), "prototype tools open with a focused return action")
+	var portal := _control(menu, "%PortalPrototype") as CheckBox
+	_check(await _reach(portal) and not portal.button_pressed, "main menu portal routes are reachable and opt-in")
 	for path in ["%StartRunButton", "%StartEnemyVarietyRunButton", "%StartLocalCoopButton",
 			"%StartStatusPlaytestButton", "%StartModifierPlaytestButton", "%CardExpansion",
 			"%EnemyPlaytest", "%StartEnemyPlaytestButton"]:
@@ -198,6 +203,42 @@ func _check_run_encounter(run: Control, progress: String, encounter: String) -> 
 	_check(progress in title.text and encounter in title.text, "run combat shows " + progress + " and " + encounter)
 	_check(await _reach(title), "multi-enemy run combat title is fully readable")
 	_check_control(_control(combat, "%EndTurnButton"), "multi-enemy run combat")
+
+
+func _test_portal_run(local_coop: bool) -> void:
+	var run := RUN.instantiate() as Control
+	run.run_data = MULTI_ENEMY_RUN.duplicate()
+	run.run_data.portal_enabled = true
+	run.local_coop = local_coop
+	_viewport.add_child(run)
+	await _settle()
+	var choices := _control(run, "%Choices")
+	if not local_coop:
+		await _act_on(choices.get_child(0) as Button, "solo portal opening")
+	await _check_run_encounter(run, "Encounter 1 of 4", "Two Slimes")
+	await _finish_displayed_fight(run)
+	if local_coop:
+		for seat in 2:
+			await _act_on(choices.get_child(0) as Button, "portal reward reveal for Mage %d" % (seat + 1))
+			await _act_on(choices.get_child(choices.get_child_count() - 1) as Button,
+				"portal reward skip for Mage %d" % (seat + 1))
+	else:
+		await _act_on(choices.get_child(choices.get_child_count() - 1) as Button, "solo portal reward skip")
+	var heading := _control(run, "%Heading") as Label
+	_check("Choose a Portal" in heading.text and choices.get_child_count() == 2
+		and not _control(run, "%DeckTitle").visible, "portals replace personal rewards in the post-encounter panel")
+	for choice: Button in choices.get_children():
+		_check(choice.has_meta(&"portal_id") and "Next portals:" in choice.text and " / " in choice.text
+			and await _reach(choice), "portal choice shows a readable one-step branch")
+		_check_button_text(choice, "portal preview")
+	var chosen_portal := choices.get_child(0) as Button
+	var next_name := chosen_portal.text.get_slice("  ·  ", 0).trim_prefix("Portal to ")
+	await _act_on(chosen_portal, "choose a portal")
+	if local_coop:
+		_check("1/2" in heading.text and not run.has_node("Combat"), "local portal waits for both Mages")
+		await _act_on(choices.get_child(0) as Button, "choose a portal for the second Mage")
+	await _check_run_encounter(run, "Encounter 2 of 4", next_name)
+	await _close(run)
 
 
 func _test_arcana_run(local_coop: bool) -> void:
@@ -381,10 +422,15 @@ func _test_network() -> void:
 	_check(arcana_option.visible and not arcana_option.disabled and not arcana_option.button_pressed,
 		"network Arcana choice is an opt-in on the multi-enemy route")
 	await _act_on(arcana_option, "network Major Arcana toggle")
+	var portal_option := _control(scene, "%PortalPrototype") as CheckBox
+	_check(portal_option.visible and not portal_option.disabled and not portal_option.button_pressed,
+		"network portals are an opt-in on the multi-enemy route")
+	await _act_on(portal_option, "network Portal Routes toggle")
 	await _act_on(variety, "network switch back to Enemy Variety")
 	_check(not multi_enemy.button_pressed and variety.button_pressed and session.run_data != MULTI_ENEMY_RUN,
 		"switching back to Enemy Variety clears the multi-enemy route")
 	_check(not arcana_option.visible and not arcana_option.button_pressed, "switching routes clears Arcana opt-in")
+	_check(not portal_option.visible and not portal_option.button_pressed, "switching routes clears portal opt-in")
 
 	var combat := _control(scene, "%CombatSlot").get_node("Combat") as Control
 	session.party_size = 4
@@ -471,6 +517,27 @@ func _test_network() -> void:
 	_check_control(run_stage, "multi-enemy network reward")
 	_check_control(reward_status, "multi-enemy network reward")
 	_check_control(_control(scene, "%SkipReward"), "multi-enemy network reward")
+	session.snapshot.merge({
+		"run_stage": "portal", "encounter_id": 1, "encounter_count": 4, "enemy_name": "Two Slimes",
+		"portal_ready": 0, "portal_submitted": false,
+		"portal_options": PortalRoute.new(MULTI_ENEMY_RUN.run_seed).options(&"two_slimes"),
+	}, true)
+	session.changed.emit()
+	await _settle()
+	_check("Choose a Portal" in run_stage.text and not skip.visible and not combat.is_visible_in_tree(),
+		"network portal choices replace rewards without a map transition")
+	_check_control(_control(scene, "%RewardProgress"), "network portal progress")
+	var portals := _control(scene, "%RewardChoices")
+	_check(portals.get_child_count() == 2, "network portal view removed the previous reward buttons")
+	for choice: Button in portals.get_children():
+		_check(choice.has_meta(&"portal_id") and await _reach(choice), "network branch preview is reachable")
+		_check_button_text(choice, "network portal preview")
+	session.snapshot.portal_submitted = true
+	session.snapshot.portal_ready = 1
+	session.changed.emit()
+	await _settle()
+	_check((portals.get_child(0) as Button).disabled and "1/4" in
+		(_control(scene, "%RewardProgress") as Label).text, "network portal vote locks while waiting")
 	await _close(scene)
 
 

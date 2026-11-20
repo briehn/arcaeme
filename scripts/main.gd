@@ -14,6 +14,7 @@ const LOCAL_COOP_SCENE = preload("res://scenes/local_coop.tscn")
 @onready var enemy_playtest: EnemyPlaytestSelector = %EnemyPlaytest
 @onready var card_expansion: CheckBox = %CardExpansion
 @onready var major_arcana: CheckBox = %MajorArcana
+@onready var portal_prototype: CheckBox = %PortalPrototype
 
 var _enemy_local_coop_button: Button
 
@@ -24,7 +25,7 @@ func _ready() -> void:
 	_fit_logo_area()
 	var unchecked := _checkbox_marker(false)
 	var checked := _checkbox_marker(true)
-	for toggle: CheckBox in [major_arcana, card_expansion]:
+	for toggle: CheckBox in [major_arcana, portal_prototype, card_expansion]:
 		toggle.add_theme_icon_override(&"unchecked", unchecked)
 		toggle.add_theme_icon_override(&"checked", checked)
 
@@ -76,9 +77,10 @@ func _on_start_enemy_variety_run_pressed() -> void:
 func _start_multi_enemy_run(local_coop: bool) -> void:
 	var run: PrototypeRunView = PROTOTYPE_RUN_SCENE.instantiate()
 	run.run_data = MULTI_ENEMY_RUN
-	if major_arcana.button_pressed:
+	if major_arcana.button_pressed or portal_prototype.button_pressed:
 		run.run_data = MULTI_ENEMY_RUN.duplicate()
-		run.run_data.major_arcana_enabled = true
+		run.run_data.major_arcana_enabled = major_arcana.button_pressed
+		run.run_data.portal_enabled = portal_prototype.button_pressed
 	run.local_coop = local_coop
 	get_tree().change_scene_to_node(run)
 

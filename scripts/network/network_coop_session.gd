@@ -4,6 +4,7 @@ const Authority = preload("res://scripts/network/network_combat_authority.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
+const PortalRoute = preload("res://scripts/run/portal_route.gd")
 
 signal changed
 signal command_result(sequence: int, result: int)
@@ -92,6 +93,12 @@ func submit_arcana(arcana_id: String) -> bool:
 	return _submit(Authority.Command.ARCANA, -1, arcana_id)
 
 
+func submit_portal(portal_id: String) -> bool:
+	if snapshot.get("run_stage") != CoopRunState.PORTAL or snapshot.get("portal_submitted", true):
+		return false
+	return _submit(Authority.Command.PORTAL, -1, portal_id)
+
+
 func _open(port: int, as_host: bool, seats: int, short_run := false) -> Error:
 	if _transport != null:
 		return ERR_ALREADY_IN_USE
@@ -148,6 +155,8 @@ func _valid_host_setup(seats: int) -> bool:
 			or run_data.intermediate_encounters.has(null)
 			or run_data.player_max_hp <= 0 or run_data.starting_deck.is_empty()
 			or run_data.eligible_rewards(RunData.BATTLE_MAGE).is_empty()):
+		return false
+	if _hosting_short_run and run_data.portal_enabled and run_data.opening_encounters[0].enemy_id != PortalRoute.START:
 		return false
 	var selected := player_ids.slice(0, seats)
 	for player_id in selected:
@@ -264,6 +273,8 @@ func _submit(kind: Authority.Command, copy_id: int = -1, choice_id := "", target
 		request["arcana_id"] = choice_id
 	elif kind == Authority.Command.REWARD:
 		request["reward_id"] = choice_id
+	elif kind == Authority.Command.PORTAL:
+		request["portal_id"] = choice_id
 	else:
 		request["round"] = snapshot["round"]
 		request["phase"] = snapshot["phase"]

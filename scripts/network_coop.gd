@@ -8,6 +8,7 @@ const CardExpansionPlaytest = preload("res://scripts/run/card_expansion_playtest
 const EnemyPlaytestSelector = preload("res://scripts/ui/enemy_playtest_selector.gd")
 const PacingExperiment = preload("res://scripts/run/pacing_experiment.gd")
 const PacingVariantPicker = preload("res://scripts/ui/pacing_variant_picker.gd")
+const PortalChoiceButton = preload("res://scripts/ui/portal_choice_button.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 const STATUS_ENCOUNTER = preload("res://resources/prototype/status_playtest/encounter.tres")
 const MODIFIER_ENCOUNTER = preload("res://resources/prototype/modifier_playtest/encounter.tres")
@@ -22,6 +23,7 @@ const MULTI_ENEMY_RUN = preload("res://resources/prototype/multi_enemy_run.tres"
 @onready var enemy_variety_run_field: CheckBox = %EnemyVarietyRun
 @onready var multi_enemy_run_field: CheckBox = %MultiEnemyRun
 @onready var major_arcana_field: CheckBox = %MajorArcana
+@onready var portal_prototype_field: CheckBox = %PortalPrototype
 @onready var pacing_controls: HBoxContainer = %PacingControls
 @onready var pacing_variant_field: PacingVariantPicker = %PacingVariant
 @onready var status_playtest_field: CheckBox = %StatusPlaytest
@@ -44,6 +46,7 @@ const MULTI_ENEMY_RUN = preload("res://resources/prototype/multi_enemy_run.tres"
 @onready var combat_slot: Control = %CombatSlot
 
 var _combat: CombatView
+var _choice_stage := ""
 
 
 func _ready() -> void:
@@ -81,6 +84,7 @@ func _refresh() -> void:
 	enemy_variety_run_field.disabled = connected_or_waiting or not short_run_field.button_pressed
 	multi_enemy_run_field.disabled = connected_or_waiting or not short_run_field.button_pressed
 	major_arcana_field.disabled = connected_or_waiting or not major_arcana_field.visible
+	portal_prototype_field.disabled = connected_or_waiting or not portal_prototype_field.visible
 	pacing_variant_field.disabled = connected_or_waiting or not enemy_variety_run_field.button_pressed
 	status_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
 	modifier_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
@@ -110,6 +114,8 @@ func _refresh_session_view() -> void:
 			stage_title = "Encounter"
 		CoopRunState.REWARD:
 			stage_title = "Choose a Card Reward"
+		CoopRunState.PORTAL:
+			stage_title = "Choose a Portal"
 		CoopRunState.BOSS:
 			stage_title = "Boss" if configured_title.is_empty() else "Final Encounter"
 		CoopRunState.VICTORY:
@@ -125,15 +131,24 @@ func _refresh_session_view() -> void:
 		if stage == CoopRunState.BOSS:
 			encounter_name = "Boss: " + encounter_name
 		var encounter_title := "Encounter %d of %d  ·  %s" % [index, encounter_count, encounter_name]
-		if stage in [CoopRunState.REWARD, CoopRunState.VICTORY, CoopRunState.DEFEAT]:
+		if stage in [CoopRunState.REWARD, CoopRunState.PORTAL, CoopRunState.VICTORY, CoopRunState.DEFEAT]:
 			stage_title += "  /  " + encounter_title
 		else:
 			stage_title = encounter_title
 	run_stage_label.text = "%s  /  %s" % [run_title, stage_title]
-	if stage == CoopRunState.REWARD or stage == CoopRunState.ARCANA:
+	if stage in [CoopRunState.REWARD, CoopRunState.ARCANA, CoopRunState.PORTAL]:
 		combat_slot.hide()
-		_refresh_choices(stage == CoopRunState.ARCANA)
+		var opening_panel := stage != _choice_stage
+		if opening_panel:
+			_clear_reward_choices()
+		_choice_stage = stage
+		reward_panel.show()
+		if stage == CoopRunState.PORTAL:
+			_refresh_portals(opening_panel)
+		else:
+			_refresh_choices(stage == CoopRunState.ARCANA, opening_panel)
 		return
+	_choice_stage = ""
 	if reward_panel.visible:
 		reward_panel.hide()
 		_clear_reward_choices()
@@ -146,11 +161,9 @@ func _refresh_session_view() -> void:
 		combat_slot.show()
 
 
-func _refresh_choices(selecting_arcana: bool) -> void:
-	var opening_panel := not reward_panel.visible
+func _refresh_choices(selecting_arcana: bool, opening_panel: bool) -> void:
 	var prefix := "arcana" if selecting_arcana else "reward"
 	var category := "Arcana" if selecting_arcana else "reward"
-	reward_panel.show()
 	reward_progress.text = "%d/%d %s decisions submitted" % [
 		session.snapshot[prefix + "_ready"], session.party_size, category]
 	var connected := session.status == NetworkSession.Status.ACTIVE
@@ -170,7 +183,10 @@ func _refresh_choices(selecting_arcana: bool) -> void:
 	if connected and not selecting_arcana and session.snapshot.get("encounter_count", 0) > 2:
 		reward_status.text = ("Reward decision submitted." if submitted
 			else "Choose one provisional Battle Mage card for your run deck, or skip.")
-		reward_status.text += " Next: %s, after everyone's decision." % session.snapshot["next_encounter_name"]
+		if session.snapshot.get("portal_after_reward", false):
+			reward_status.text += " The portals open after everyone's reward decision."
+		else:
+			reward_status.text += " Next: %s, after everyone's decision." % session.snapshot["next_encounter_name"]
 	var arcana: Dictionary = session.snapshot.get("arcana", {})
 	if not arcana.is_empty():
 		reward_status.text += "\nMajor Arcana: " + String(arcana.name)
@@ -196,6 +212,29 @@ func _refresh_choices(selecting_arcana: bool) -> void:
 	if opening_panel and input_allowed:
 		var focus_target: Button = reward_choices.get_child(0) if reward_choices.get_child_count() > 0 else skip_reward_button
 		focus_target.grab_focus()
+
+
+func _refresh_portals(opening_panel: bool) -> void:
+	reward_progress.text = "%d/%d portal choices submitted" % [session.snapshot.portal_ready, session.party_size]
+	skip_reward_button.hide()
+	var connected := session.status == NetworkSession.Status.ACTIVE
+	var submitted: bool = session.snapshot.portal_submitted
+	if not connected:
+		reward_status.text = "The session ended."
+	elif submitted:
+		reward_status.text = "Choice submitted. Waiting for the other Mages."
+	else:
+		reward_status.text = "Choose a portal here. Each preview shows one step ahead. One Mage's choice is drawn after everyone submits."
+	if reward_choices.get_child_count() == 0:
+		for option: Dictionary in session.snapshot.portal_options:
+			var button := PortalChoiceButton.make(option)
+			button.pressed.connect(session.submit_portal.bind(String(option.id)))
+			reward_choices.add_child(button)
+	var input_allowed := connected and not submitted and session.can_submit()
+	for button: Button in reward_choices.get_children():
+		button.disabled = not input_allowed
+	if opening_panel and input_allowed and reward_choices.get_child_count() > 0:
+		reward_choices.get_child(0).grab_focus()
 
 
 func _clear_reward_choices() -> void:
@@ -242,8 +281,11 @@ func _refresh_run_variant() -> void:
 	var variety := enemy_variety_run_field.button_pressed
 	major_arcana_field.visible = short_run_field.button_pressed and multi_enemy_run_field.button_pressed
 	major_arcana_field.disabled = not major_arcana_field.visible
+	portal_prototype_field.visible = major_arcana_field.visible
+	portal_prototype_field.disabled = not portal_prototype_field.visible
 	if not major_arcana_field.visible:
 		major_arcana_field.set_pressed_no_signal(false)
+		portal_prototype_field.set_pressed_no_signal(false)
 	if variety:
 		session.run_data = ENEMY_VARIETY_RUN
 	elif multi_enemy_run_field.button_pressed:
@@ -327,9 +369,10 @@ func _on_host_pressed() -> void:
 			session.run_data = CardExpansionPlaytest.with_expansion_run(session.run_data)
 	elif multi_enemy_run_field.button_pressed:
 		session.run_data = MULTI_ENEMY_RUN
-		if major_arcana_field.button_pressed:
+		if major_arcana_field.button_pressed or portal_prototype_field.button_pressed:
 			session.run_data = MULTI_ENEMY_RUN.duplicate()
-			session.run_data.major_arcana_enabled = true
+			session.run_data.major_arcana_enabled = major_arcana_field.button_pressed
+			session.run_data.portal_enabled = portal_prototype_field.button_pressed
 	session.host(int(port_field.value), party_size, short_run_field.button_pressed)
 
 
