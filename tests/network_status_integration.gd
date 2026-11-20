@@ -130,11 +130,11 @@ func _check_expected_state(view: Dictionary) -> bool:
 		for index in _size:
 			var player: Dictionary = view.players[index]
 			var ended := index == 1
-			var expected_hp := 34 if index == 0 else (22 if ended else 25)
-			valid = valid and player.hp == expected_hp and player.burning == (2 if ended else 3) and \
-				player.poison == 1 and player.ended_turn == ended and player.mana == (0 if ended else 3)
+			var expected_hp := 34 if index == 0 else 25
+			valid = valid and player.hp == expected_hp and player.burning == 3 and \
+				player.poison == 1 and player.ended_turn == ended and player.mana == 3
 		if _seat == 2:
-			valid = valid and view.hand.is_empty() and not view.can_end_turn
+			valid = valid and view.hand.size() == 5 and not view.can_end_turn and view.can_undo_ready
 	elif view.revision == _round_three_revision:
 		valid = view.round == 3 and _match_status(view, 6, 6, 4, 28, 10, 2, 5)
 	elif view.revision == _steps.size():

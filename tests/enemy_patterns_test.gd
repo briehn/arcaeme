@@ -149,9 +149,10 @@ func _submit(authority: Authority, peer: int, kind: Authority.Command) -> void:
 	if kind == Authority.Command.REWARD:
 		request["reward_id"] = ""
 	else:
-		request.merge({"round": view.round, "phase": view.phase})
+		request.merge({"round": view.round, "phase": view.phase, "ready_epoch": view.ready_epoch})
 		if kind == Authority.Command.PLAY_CARD:
 			request["copy"] = view.hand[0].copy
+			request["target"] = view.enemies[0].id
 	_check(authority.submit(peer, request) == Authority.Result.ACCEPTED, "authority accepts the scripted action")
 
 

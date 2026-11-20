@@ -76,6 +76,10 @@ func submit_end_turn() -> bool:
 	return _submit(Authority.Command.END_TURN)
 
 
+func submit_undo_ready() -> bool:
+	return _submit(Authority.Command.UNDO_READY)
+
+
 func submit_reward(card_id: String) -> bool:
 	if snapshot.get("run_stage") != CoopRunState.REWARD or snapshot.get("reward_submitted", true):
 		return false
@@ -244,6 +248,7 @@ func _submit(kind: Authority.Command, copy_id: int = -1, reward_id := "", target
 	else:
 		request["round"] = snapshot["round"]
 		request["phase"] = snapshot["phase"]
+		request["ready_epoch"] = snapshot["ready_epoch"]
 		if kind == Authority.Command.PLAY_CARD:
 			request["copy"] = copy_id
 			if target_id != &"":

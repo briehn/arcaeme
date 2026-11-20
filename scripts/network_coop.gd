@@ -58,6 +58,7 @@ func _ready() -> void:
 	_combat.configure_network()
 	_combat.network_card_requested.connect(session.submit_card)
 	_combat.network_end_turn_requested.connect(session.submit_end_turn)
+	_combat.network_undo_ready_requested.connect(session.submit_undo_ready)
 	combat_slot.add_child(_combat)
 	session.changed.connect(_refresh)
 	_refresh()

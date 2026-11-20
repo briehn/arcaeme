@@ -104,8 +104,8 @@ func _test_personal_status_timing() -> void:
 	_play(combat, HOST, BLOCK.id)
 	_play(combat, HOST, BLOCK.id)
 	combat.end_turn(HOST)
-	_check(host.hp == 5 and host.block == 10 and host.burning == 3 and host.poison == 2 and host.mana == 0,
-		"personal end-of-turn Burning bypasses Block and decays while Poison remains unchanged")
+	_check(host.hp == 10 and host.block == 10 and host.burning == 5 and host.poison == 2 and host.mana == 1,
+		"being Ready defers Burning and keeps the Mage's remaining Mana and Block")
 	_check(ally.hp == 3 and ally.burning == 5 and ally.hand.size() == 2 and not ally.ended_turn and combat.round_number == 2,
 		"one end turn never ticks somebody else's Burning or advances the shared phase")
 	combat.end_turn(ALLY)
@@ -294,11 +294,12 @@ func _submit(authority: Authority, peer: int, kind: Authority.Command, card_id: 
 	if kind == Authority.Command.REWARD:
 		request["reward_id"] = ""
 	else:
-		request.merge({"round": snapshot.round, "phase": snapshot.phase})
+		request.merge({"round": snapshot.round, "phase": snapshot.phase, "ready_epoch": snapshot.ready_epoch})
 		if kind == Authority.Command.PLAY_CARD:
 			for card in snapshot.hand:
 				if card.id == String(card_id):
 					request["copy"] = card.copy
+					request["target"] = snapshot.enemies[0].id
 					break
 	_check(authority.submit(peer, request) == Authority.Result.ACCEPTED,
 		"authority accepts %s from peer %d" % [Authority.Command.keys()[kind], peer])

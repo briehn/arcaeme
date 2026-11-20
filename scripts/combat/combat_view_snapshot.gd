@@ -53,6 +53,7 @@ static func build(state: CombatState, encounter: EncounterData, viewer: StringNa
 		"enemy_block": state.enemy_block, "enemy_intent": state.enemy_intent(),
 		"enemy_attack": state.enemy_attack_damage(), "hand": hand, "draw_count": local.draw_pile.size(),
 		"discard_count": local.discard_pile.size(), "can_end_turn": state.can_end_turn(viewer),
+		"can_undo_ready": state.can_undo_ready(viewer), "ready_epoch": local.ready_epoch,
 		# The first resolver log line contains the seed. Publish only the subsequent combat events.
 		"log": state.combat_log if show_seed else state.combat_log.slice(1),
 	}

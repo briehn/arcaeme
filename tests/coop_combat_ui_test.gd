@@ -24,7 +24,7 @@ func _run() -> void:
 	await _open_coop()
 	_check(current_scene.scene_file_path == COOP and _text("%TurnLabel") == "Turn 1  /  Shared player phase",
 		"Start Local Co-op Test opens the shared phase")
-	_check("HP 25/25" in _stats(0) and "HP 25/25" in _stats(1) and "Ready" in _stats(0) and "Ready" in _stats(1),
+	_check("HP 25/25" in _stats(0) and "HP 25/25" in _stats(1) and "Not Ready" in _stats(0) and "Not Ready" in _stats(1),
 		"both players' identities, health and turn status are visible")
 	_check("Attack all living players for 13 damage each" in _text("%EnemyLabel"), "enemy telegraphs damage per player")
 	_check(_text("%CardsLabel").begins_with(ONE) and _find_button("%HandCards", "Shieldstrike") != null,
@@ -37,8 +37,9 @@ func _run() -> void:
 		"player two plays first and only their Mana changes")
 	_end_turn()
 	var end_button: Button = current_scene.get_node("%EndTurnButton")
-	_check(_text("%TurnLabel").begins_with("Turn 1") and "Turn ended" in _stats(1) and "HP 25/25" in _stats(1) and
-		end_button.disabled and "Hand 0" in _text("%CardsLabel"), "ending first waits for the other player")
+	_check(_text("%TurnLabel").begins_with("Turn 1") and _stats(1).ends_with("Ready") and "HP 25/25" in _stats(1) and
+		not end_button.disabled and end_button.text.begins_with("Undo Ready") and "Hand 4" in _text("%CardsLabel"),
+		"ready preserves the hand and exposes Undo Ready while another player waits")
 	_select(ONE)
 	_play("Arcane Guard")
 	_play("Battle Preparation")

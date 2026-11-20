@@ -6,10 +6,12 @@ const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
 const ViewSnapshot = preload("res://scripts/combat/combat_view_snapshot.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
 const PLAYER_ID := &"Battle Mage"
+const TARGET_HIGHLIGHT := Color(0.98, 0.84, 0.56)
 
 signal encounter_finished(combat: CombatState)
 signal network_card_requested(copy_id: int, target_id: StringName)
 signal network_end_turn_requested
+signal network_undo_ready_requested
 
 @export var encounter: EncounterData
 @export var player_ids: Array[StringName] = [PLAYER_ID]
@@ -25,6 +27,7 @@ signal network_end_turn_requested
 @onready var hand_cards: HFlowContainer = %HandCards
 @onready var combat_log: RichTextLabel = %CombatLog
 @onready var end_turn_button: Button = %EndTurnButton
+@onready var cancel_target_button: Button = %CancelTargetButton
 
 var _state: CombatState
 var _selected_player_id: StringName
@@ -35,10 +38,9 @@ var _network_mode := false
 var _displayed_encounter := -1
 var _snapshot: Dictionary = {}
 var _input_allowed := false
-var _selected_target_id: StringName
+var _pending_card_copy := -1
 var _living_enemy_ids: Array[StringName] = []
 var _enemy_buttons: Dictionary[StringName, WrappedTextButton] = {}
-var _enemy_button_group := ButtonGroup.new()
 
 
 func configure_run(combat: CombatState, run_encounter: EncounterData, title: String) -> void:
@@ -66,7 +68,8 @@ func clear_network_view() -> void:
 	_displayed_encounter = -1
 	_snapshot = {}
 	_input_allowed = false
-	_selected_target_id = &""
+	_pending_card_copy = -1
+	cancel_target_button.hide()
 	_living_enemy_ids.clear()
 	_clear_enemy_buttons()
 	_render_hand([], false)
@@ -94,12 +97,24 @@ func _render() -> void:
 
 
 func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
+	if snapshot.get("viewer") != _snapshot.get("viewer") or snapshot.get("round") != _snapshot.get("round"):
+		_pending_card_copy = -1
 	_snapshot = snapshot
 	_input_allowed = input_allowed
 	var party := snapshot["players"] as Array
 	var coop := party.size() > 1
 	var phase: int = snapshot["phase"]
 	var in_combat := phase == CombatState.Phase.PLAYER
+	var hand: Array = snapshot["hand"]
+	var pending_card_name := ""
+	if in_combat and input_allowed and _pending_card_copy >= 0:
+		for card: Dictionary in hand:
+			if card.copy == _pending_card_copy and card.playable and card.get("targets_enemy", false):
+				pending_card_name = card.name
+				break
+	if pending_card_name.is_empty():
+		_pending_card_copy = -1
+	cancel_target_button.visible = not pending_card_name.is_empty()
 	match phase:
 		CombatState.Phase.VICTORY:
 			turn_label.text = "Team Victory" if coop else "Victory"
@@ -111,19 +126,21 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 	for party_member in party:
 		stats.append(_player_stats(party_member, coop, phase))
 	player_label.text = "\n".join(stats)
-	_render_enemies(snapshot, in_combat, coop)
-	var hand: Array = snapshot["hand"]
+	_render_enemies(snapshot, in_combat, coop, pending_card_name)
 	cards_label.text = "Hand %d   ·   Draw pile %d   ·   Discard pile %d" % [
 		hand.size(), snapshot["draw_count"], snapshot["discard_count"]]
 	if snapshot.has("seed"):
 		cards_label.text += "   ·   Seed %d" % snapshot["seed"]
 	var continue_run := not in_combat and not _run_title.is_empty()
-	end_turn_button.text = "Continue Run" if continue_run else "End Turn"
+	var can_undo: bool = snapshot.get("can_undo_ready", false)
+	end_turn_button.text = "Undo Ready" if can_undo else "End Turn"
+	if continue_run:
+		end_turn_button.text = "Continue Run"
 	if coop:
 		cards_label.text = "%s   ·   %s" % [snapshot["viewer"], cards_label.text]
 		if not continue_run:
-			end_turn_button.text = "End Turn · %s" % snapshot["viewer"]
-	end_turn_button.disabled = not continue_run and (not input_allowed or not snapshot["can_end_turn"])
+			end_turn_button.text += " · %s" % snapshot["viewer"]
+	end_turn_button.disabled = not continue_run and (not input_allowed or not (snapshot["can_end_turn"] or can_undo))
 	_render_hand(hand, input_allowed)
 	var log_lines: PackedStringArray = snapshot["log"]
 	while _shown_log_lines < log_lines.size():
@@ -131,22 +148,18 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 		_shown_log_lines += 1
 
 
-func _render_enemies(snapshot: Dictionary, in_combat: bool, coop: bool) -> void:
+func _render_enemies(snapshot: Dictionary, in_combat: bool, coop: bool, pending_card_name: String) -> void:
 	var enemies: Array = snapshot.get("enemies", [])
 	_living_enemy_ids.clear()
 	for enemy: Dictionary in enemies:
 		if enemy.alive:
 			_living_enemy_ids.append(StringName(enemy.id))
-	if _living_enemy_ids.size() == 1:
-		_selected_target_id = _living_enemy_ids[0]
-	elif not _living_enemy_ids.has(_selected_target_id):
-		_selected_target_id = &""
 	enemy_picker.visible = enemies.size() > 1
 	enemy_label.visible = not enemy_picker.visible
 	if enemy_label.visible:
 		_render_single_enemy(snapshot, in_combat, coop)
 		return
-	_render_enemy_picker(enemies, in_combat, coop)
+	_render_enemy_picker(enemies, in_combat, coop, pending_card_name)
 
 
 func _render_single_enemy(snapshot: Dictionary, in_combat: bool, coop: bool) -> void:
@@ -163,13 +176,14 @@ func _render_single_enemy(snapshot: Dictionary, in_combat: bool, coop: bool) -> 
 			snapshot.get("enemy_poison_per_attack", 0), snapshot.get("enemy_burning_per_attack", 0))
 
 
-func _render_enemy_picker(enemies: Array, in_combat: bool, coop: bool) -> void:
+func _render_enemy_picker(enemies: Array, in_combat: bool, coop: bool, pending_card_name: String) -> void:
 	var name_counts: Dictionary[String, int] = {}
 	var name_indices: Dictionary[String, int] = {}
 	for enemy: Dictionary in enemies:
 		name_counts[enemy.name] = name_counts.get(enemy.name, 0) + 1
-	target_label.visible = in_combat
-	target_label.text = "Choose an enemy to play a targeted card."
+	var choosing_target := not pending_card_name.is_empty()
+	target_label.visible = choosing_target
+	target_label.text = "Choose a target for %s" % pending_card_name
 	for index in enemies.size():
 		var enemy: Dictionary = enemies[index]
 		var enemy_id := StringName(enemy.id)
@@ -182,8 +196,6 @@ func _render_enemy_picker(enemies: Array, in_combat: bool, coop: bool) -> void:
 			button = WrappedTextButton.new()
 			button.custom_minimum_size = Vector2(250, 78)
 			button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			button.toggle_mode = true
-			button.button_group = _enemy_button_group
 			button.pressed.connect(_on_enemy_selected.bind(enemy_id))
 			enemy_targets.add_child(button)
 			_enemy_buttons[enemy_id] = button
@@ -195,11 +207,8 @@ func _render_enemy_picker(enemies: Array, in_combat: bool, coop: bool) -> void:
 		elif in_combat:
 			details += "\nIntent: " + _enemy_intent(enemy.intent, coop, enemy.attack_poison, enemy.attack_burning)
 		button.set_wrapped_text(details)
-		button.disabled = not in_combat or not _input_allowed or not enemy.alive
-		var is_target := in_combat and _selected_target_id == enemy_id
-		button.set_pressed_no_signal(is_target)
-		if is_target:
-			target_label.text = "Target: " + enemy_name
+		button.disabled = not choosing_target or not enemy.alive
+		_highlight_target_choice(button, not button.disabled)
 		enemy_targets.move_child(button, index)
 
 
@@ -212,10 +221,9 @@ func _clear_enemy_buttons() -> void:
 
 func _on_enemy_selected(enemy_id: StringName) -> void:
 	var button: Button = _enemy_buttons.get(enemy_id)
-	if button == null or button.disabled or not _living_enemy_ids.has(enemy_id):
+	if _pending_card_copy < 0 or button == null or button.disabled or not _living_enemy_ids.has(enemy_id):
 		return
-	_selected_target_id = enemy_id
-	_render_snapshot(_snapshot, _input_allowed)
+	_submit_card(_pending_card_copy, enemy_id)
 
 
 func _enemy_intent(intent: Dictionary, coop: bool, poison_per_attack: int, burning_per_attack: int) -> String:
@@ -238,7 +246,7 @@ func _player_stats(player: Dictionary, show_turn_status: bool, phase: int) -> St
 	if player.next_attack_bonus > 0:
 		stats += "   ·   Next Attack +%d damage" % player.next_attack_bonus
 	if show_turn_status:
-		var status := "Ready"
+		var status := "Not Ready"
 		if player.recovered:
 			status = "Recovered after victory"
 		elif player.hp == 0:
@@ -246,7 +254,7 @@ func _player_stats(player: Dictionary, show_turn_status: bool, phase: int) -> St
 		elif phase == CombatState.Phase.VICTORY:
 			status = "Survived"
 		elif player.ended_turn:
-			status = "Turn ended"
+			status = "Ready"
 		stats += "   ·   " + status
 	stats += _modifier_counters(player.get("strength", 0), player.get("dexterity", 0))
 	return stats + _status_counters(player.get("poison", 0), player.get("burning", 0))
@@ -317,7 +325,8 @@ func _render_hand(hand: Array, input_allowed: bool) -> void:
 		hand_cards.move_child(button, hand_index)
 		var targets_enemy: bool = card.get("targets_enemy", false)
 		button.set_meta("targets_enemy", targets_enemy)
-		button.disabled = not input_allowed or not card.playable or (targets_enemy and _selected_target_id == &"")
+		button.disabled = not input_allowed or not card.playable or (targets_enemy and _living_enemy_ids.is_empty())
+		_highlight_target_choice(button, copy_id == _pending_card_copy)
 		if refresh_focus and not button.disabled:
 			button.grab_focus()
 			refresh_focus = false
@@ -332,26 +341,82 @@ func _on_card_pressed(copy_id: int) -> void:
 	var button: Button = _card_buttons.get(copy_id)
 	if button == null or button.disabled:
 		return
-	var target: StringName = &""
-	if button.get_meta("targets_enemy"):
-		if not _living_enemy_ids.has(_selected_target_id):
-			return
-		target = _selected_target_id
-	if _network_mode:
-		network_card_requested.emit(copy_id, target)
+	if _pending_card_copy == copy_id:
+		_cancel_targeting()
+	elif not button.get_meta("targets_enemy"):
+		_submit_card(copy_id, &"")
+	elif _living_enemy_ids.size() == 1:
+		_submit_card(copy_id, _living_enemy_ids[0])
+	else:
+		_pending_card_copy = copy_id
+		_render_snapshot(_snapshot, _input_allowed)
+		# At compact sizes, focusing a valid target brings the enemy row into view.
+		_enemy_buttons[_living_enemy_ids[0]].grab_focus()
+
+
+func _highlight_target_choice(button: Button, highlighted: bool) -> void:
+	if button.has_theme_color_override("font_color") == highlighted:
 		return
-	if _state.play_card(_selected_player_id, copy_id, target):
+	if highlighted:
+		button.add_theme_color_override("font_color", TARGET_HIGHLIGHT)
+		button.add_theme_color_override("font_focus_color", TARGET_HIGHLIGHT)
+	else:
+		button.remove_theme_color_override("font_color")
+		button.remove_theme_color_override("font_focus_color")
+
+
+func _cancel_targeting() -> void:
+	if _pending_card_copy < 0:
+		return
+	var button: Button = _card_buttons.get(_pending_card_copy)
+	_pending_card_copy = -1
+	_render_snapshot(_snapshot, _input_allowed)
+	if button != null and not button.disabled:
+		button.grab_focus()
+
+
+func _submit_card(copy_id: int, target: StringName) -> void:
+	_pending_card_copy = -1
+	if _network_mode:
+		_render_snapshot(_snapshot, _input_allowed)
+		network_card_requested.emit(copy_id, target)
+	else:
+		_state.play_card(_selected_player_id, copy_id, target)
 		_render()
 
 
+func _input(event: InputEvent) -> void:
+	# The same footer position can change from End Turn to Undo Ready, or start a new round.
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
+			and event.double_click and end_turn_button.is_visible_in_tree():
+		var local_position: Vector2 = end_turn_button.get_global_transform_with_canvas().affine_inverse() * event.position
+		if Rect2(Vector2.ZERO, end_turn_button.size).has_point(local_position):
+			get_viewport().set_input_as_handled()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if _pending_card_copy >= 0 and is_visible_in_tree() and event.is_action_pressed("ui_cancel"):
+		_cancel_targeting()
+		get_viewport().set_input_as_handled()
+
+
 func _on_end_turn_button_pressed() -> void:
+	if end_turn_button.disabled:
+		return
+	_pending_card_copy = -1
+	var can_undo: bool = _snapshot.get("can_undo_ready", false)
 	if _network_mode:
-		network_end_turn_requested.emit()
+		_render_snapshot(_snapshot, _input_allowed)
+		if can_undo:
+			network_undo_ready_requested.emit()
+		else:
+			network_end_turn_requested.emit()
 		return
 	if not _run_title.is_empty() and (_state.phase == CombatState.Phase.VICTORY or _state.phase == CombatState.Phase.DEFEAT):
 		encounter_finished.emit(_state)
 		return
-	if _state.end_turn(_selected_player_id):
+	var changed := _state.undo_ready(_selected_player_id) if can_undo else _state.end_turn(_selected_player_id)
+	if changed:
 		_render()
 
 

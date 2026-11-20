@@ -148,9 +148,12 @@ func _test_periodic_damage_and_replay() -> void:
 			"enemy Strength applies equally before personal Block and incoming Poison remains exactly two HP")
 		_play(combat, HOST, BLOCK)
 		_check(combat.end_turn(HOST), "host ends independently")
-		_check(combat.players[HOST].hp == 35 and combat.players[HOST].burning == 2 and
+		_check(combat.players[HOST].hp == 38 and combat.players[HOST].burning == 3 and
 			combat.players[HOST].block == 10 and combat.players[ALLY].hp == 33,
-			"personal Burning deals three HP through unspent Dexterity-enhanced Block, leaving the ally alone")
+			"Ready preserves HP, Burning, and Dexterity-enhanced Block")
+		_check(combat.end_turn(ALLY) and combat.players[HOST].hp == 32 and combat.players[ALLY].hp == 22
+			and "%s lost 3 HP to Burning." % HOST in combat.combat_log,
+			"Burning bypasses Block once the party closes the phase, then the normal attack and Poison resolve")
 	_check(first.action_history == second.action_history and first.combat_log == second.combat_log and
 		Snapshot.build(first, fixture, HOST) == Snapshot.build(second, fixture, HOST) and
 		Snapshot.build(first, fixture, ALLY) == Snapshot.build(second, fixture, ALLY),
@@ -253,10 +256,12 @@ func _submit(authority: Authority, peer: int, kind: Authority.Command, card_id :
 	if kind == Authority.Command.REWARD:
 		request["reward_id"] = ""
 	else:
-		request.merge({"round": view.round, "phase": view.phase})
+		request.merge({"round": view.round, "phase": view.phase, "ready_epoch": view.ready_epoch})
 		for card in view.hand:
 			if card.id == String(card_id):
 				request["copy"] = card.copy
+				if card.targets_enemy:
+					request["target"] = view.enemies[0].id
 				break
 	_check(authority.submit(peer, request) == Authority.Result.ACCEPTED,
 		"authority accepts %s from peer %d" % [Authority.Command.keys()[kind], peer])

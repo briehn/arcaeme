@@ -126,6 +126,13 @@ text = "Back to Menu"
 layout_mode = 2
 size_flags_horizontal = 3
 
+[node name="CancelTargetButton" type="Button" parent="MarginContainer/VBoxContainer/Actions"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(138, 40)
+layout_mode = 2
+text = "Cancel Target"
+
 [node name="EndTurnButton" type="Button" parent="MarginContainer/VBoxContainer/Actions" unique_id=1291508590]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(138, 40)
@@ -133,4 +140,5 @@ layout_mode = 2
 text = "End Turn"
 
 [connection signal="pressed" from="MarginContainer/VBoxContainer/Actions/BackButton" to="." method="_on_back_button_pressed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/Actions/CancelTargetButton" to="." method="_cancel_targeting"]
 [connection signal="pressed" from="MarginContainer/VBoxContainer/Actions/EndTurnButton" to="." method="_on_end_turn_button_pressed"]

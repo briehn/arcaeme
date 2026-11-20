@@ -220,20 +220,20 @@ func _drive() -> void:
 			if view.round == 1 and view.enemies.size() > 1:
 				break
 			var target: Dictionary = live[-1]
-			if view.enemies.size() > 1:
+			var attack := combat.get_node("%HandCards").get_child(index) as Button
+			if attack.disabled:
+				_fail("A playable card is unavailable before selecting a target.")
+				return
+			_before = view
+			_sent_target = target.id
+			attack.pressed.emit()
+			if live.size() > 1:
 				var slot: int = view.enemies.find(target)
 				var button := combat.get_node("%EnemyTargets").get_child(slot) as Button
 				if button.disabled:
 					_fail("Living target is unavailable in the combat interface.")
 					return
 				button.pressed.emit()
-			var attack := combat.get_node("%HandCards").get_child(index) as Button
-			if attack.disabled:
-				_fail("The highlighted target did not enable a legal card.")
-				return
-			_before = view
-			_sent_target = target.id
-			attack.pressed.emit()
 			return
 	(combat.get_node("%EndTurnButton") as Button).pressed.emit()
 

@@ -54,9 +54,9 @@ func _test_shared_phase_and_replay() -> void:
 		"the owner's Shieldstrike applies both of its own bonuses")
 	_play(state, TWO, &"basic_block", &"")
 	_check(state.end_turn(TWO), "player two can end before player one")
-	_check(two.ended_turn and two.hand.is_empty() and two.discard_pile.size() == 5 and
+	_check(two.ended_turn and two.hand.size() == 2 and two.discard_pile.size() == 3 and
 		not one.ended_turn and one.hand.size() == 3 and state.round_number == 1 and one.hp == 25 and two.hp == 25,
-		"the first end-turn only clears that player's hand and waits")
+		"the first ready preserves that player's hand and waits")
 	_check(not state.can_end_turn(TWO) and not state.end_turn(TWO), "reject a repeated end-turn")
 	_check(state.end_turn(ONE), "the other player can end the shared phase")
 	_check(one.hp == 25 and two.hp == 17 and state.round_number == 2 and

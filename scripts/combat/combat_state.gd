@@ -24,7 +24,9 @@ class PlayerState:
 	var poison: int
 	var burning: int
 	var next_attack_bonus: int
+	# Ready is reversible until the shared phase closes.
 	var ended_turn: bool
+	var ready_epoch: int
 	var recovered_after_victory: bool
 	var first_copy_id: int
 	var hand: Array[int] = []
@@ -177,6 +179,49 @@ func end_turn(player_id: StringName) -> bool:
 		return false
 	action_history.append({&"command": &"end_turn", &"player": player_id})
 	player.ended_turn = true
+	player.ready_epoch += 1
+	if _has_unready_living_players():
+		_log("%s is ready." % player.id)
+	else:
+		_close_player_phase()
+	return true
+
+
+func can_undo_ready(player_id: StringName) -> bool:
+	var player: PlayerState = players.get(player_id)
+	return (phase == Phase.PLAYER and player != null and player.hp > 0 and player.ended_turn
+		and _has_unready_living_players())
+
+
+func undo_ready(player_id: StringName) -> bool:
+	if not can_undo_ready(player_id):
+		return false
+	var player := players[player_id]
+	action_history.append({&"command": &"undo_ready", &"player": player_id})
+	player.ended_turn = false
+	player.ready_epoch += 1
+	_log("%s undid ready." % player.id)
+	return true
+
+
+func _has_unready_living_players() -> bool:
+	for player: PlayerState in players.values():
+		if player.hp > 0 and not player.ended_turn:
+			return true
+	return false
+
+
+func _close_player_phase() -> void:
+	# Lock player input before resolving any end-of-turn effects.
+	phase = Phase.ENEMY
+	for player: PlayerState in players.values():
+		if player.hp > 0:
+			_finalize_player_turn(player)
+	if not _finish_if_party_down():
+		_resolve_enemy_phase()
+
+
+func _finalize_player_turn(player: PlayerState) -> void:
 	player.mana = 0
 	if player.next_attack_bonus > 0:
 		_log("%s's next Attack bonus expired at turn end." % player.id)
@@ -191,13 +236,6 @@ func end_turn(player_id: StringName) -> bool:
 		player.burning = _remaining_burning(player.burning)
 		if player.hp == 0:
 			_log("%s was defeated." % player.id)
-			if _finish_if_party_down():
-				return true
-	for other: PlayerState in players.values():
-		if other.hp > 0 and not other.ended_turn:
-			return true
-	_resolve_enemy_phase()
-	return true
 
 
 func _deal_card_damage(player: PlayerState, enemy: EnemyState, card: CardData, effect: CardEffect) -> void:
@@ -286,7 +324,6 @@ func _begin_player_phase() -> void:
 
 
 func _resolve_enemy_phase() -> void:
-	phase = Phase.ENEMY
 	# Provisional: finish each enemy's action and status boundaries before the next slot.
 	for enemy in enemies:
 		if not enemy.is_alive():

@@ -115,24 +115,68 @@ func _test_two_slimes(scene: PackedScene, coop: bool) -> void:
 	var first := targets.get_child(0) as Button
 	var second := targets.get_child(1) as Button
 	var prompt := _control(combat, "%TargetLabel") as Label
+	var cancel := _control(combat, "%CancelTargetButton") as Button
 	var attack := _card(combat, "Basic Strike" if coop else "Arcane Reversal")
 	var defense := _card(combat, "Basic Block" if coop else "Arcane Guard")
 	_check(targets.get_child_count() == 2 and first.text.begins_with("Slime (1)") and
-		second.text.begins_with("Slime (2)"), context + " has separate selectable displays for duplicate Slimes")
-	_check(prompt.text.begins_with("Choose an enemy") and attack != null and attack.disabled and
-		defense != null and not defense.disabled, context + " gates only enemy-targeted cards")
-	if await _reach(second):
-		_click(second)
-		await _settle()
-	_check(second.button_pressed and not first.button_pressed and prompt.text == "Target: Slime (2)" and
-		attack != null and not attack.disabled, context + " viewport input selects the second Slime and enables its attack")
+		second.text.begins_with("Slime (2)"), context + " has separate displays for duplicate Slimes")
+	_check(not prompt.visible and not cancel.visible and first.disabled and second.disabled and
+		attack != null and not attack.disabled and defense != null and not defense.disabled,
+		context + " starts with playable cards and inactive enemy targets")
 	if attack != null and await _reach(attack):
 		_click(attack)
 		await _settle()
+	_check(prompt.visible and prompt.text.begins_with("Choose a target for") and not first.disabled and
+		not second.disabled and first.has_theme_color_override("font_color") and first.has_focus()
+		and _fully_visible(first), context + " clicking the card highlights and reveals living enemies")
+	_check_control(cancel, context + " while targeting")
+	_check_control(_control(combat, "%EndTurnButton"), context + " while targeting")
+	if coop:
+		var escape := InputEventKey.new()
+		escape.keycode = KEY_ESCAPE
+		escape.pressed = true
+		_viewport.push_input(escape, true)
+	else:
+		_click(cancel)
+	await _settle()
+	_check(not prompt.visible and not cancel.visible and first.disabled and second.disabled and
+		_card(combat, attack.text.get_slice("\n", 0)) == attack and "HP 22/22" in second.text,
+		context + " cancelling keeps the card and enemy HP")
+	if attack != null and await _reach(attack):
+		_click(attack)
+		await _settle()
+	if await _reach(second):
+		_click(second)
+		await _settle()
 	var expected_hp := "HP 16/22" if coop else "HP 14/22"
-	_check("HP 18/18" in first.text and expected_hp in second.text, context + " viewport card input damages only the chosen Slime")
+	_check("HP 18/18" in first.text and expected_hp in second.text and not prompt.visible,
+		context + " the target click plays the card against only the chosen Slime")
 	_check_control(_control(combat, "%EndTurnButton"), context + " after targeting")
+	if coop:
+		await _test_local_ready(combat)
 	await _close(combat)
+
+
+func _test_local_ready(combat: Control) -> void:
+	var end := _control(combat, "%EndTurnButton") as Button
+	var player_label := _control(combat, "%PlayerLabel") as Label
+	var cards_label := _control(combat, "%CardsLabel") as Label
+	var before := cards_label.text
+	if await _reach(end):
+		_click(end)
+		_click(end, true)
+		await _settle()
+	_check(end.text == "Undo Ready · Battle Mage 2" and "Not Ready" in player_label.text.get_slice("\n", 0)
+		and player_label.text.get_slice("\n", 1).ends_with("Ready") and cards_label.text == before,
+		"local Ready preserves player two's hand and ignores a double-click")
+	_check_control(end, "local Undo Ready")
+	var defense := _card(combat, "Basic Block")
+	_check(defense != null and defense.disabled, "the selected Ready player cannot play a card")
+	_click(end)
+	await _settle()
+	_check(end.text == "End Turn · Battle Mage 2" and player_label.text.get_slice("\n", 1).ends_with("Not Ready")
+		and cards_label.text == before and defense != null and not defense.disabled,
+		"Undo Ready restores the local viewer's existing hand and play controls")
 
 
 func _test_network() -> void:
@@ -198,6 +242,7 @@ func _test_network() -> void:
 	_check(_end_requests == previous_requests + 1, "network End Turn emits its command from viewport input")
 	await _test_long_hand(session, combat, snapshot)
 	await _test_network_enemy_picker(session, combat)
+	await _test_network_ready(session, combat)
 
 	session.snapshot = _reward_snapshot(snapshot)
 	session.changed.emit()
@@ -241,9 +286,10 @@ func _test_network_enemy_picker(session: NetworkSession, combat: Control) -> voi
 	_check("Gain 6 Block" in treant.text and "Poison 4" not in treant.text,
 		"Treant independently displays its Block intent")
 	var targeted := _card(combat, "Test Toxic Spark")
+	var alternative := _card(combat, "Test Ember Spark")
 	var defensive := _card(combat, "Basic Block")
-	_check(targeted.disabled and not defensive.disabled,
-		"a targeted status card waits for selection while defensive cards remain usable")
+	_check(not targeted.disabled and not defensive.disabled and goblin.disabled,
+		"both a targeted status card and a self card can be chosen before any enemy")
 
 	var requests: Array[StringName] = []
 	combat.network_card_requested.disconnect(session.submit_card)
@@ -252,47 +298,101 @@ func _test_network_enemy_picker(session: NetworkSession, combat: Control) -> voi
 	if await _reach(defensive):
 		_click(defensive)
 		await _settle()
-	if await _reach(goblin):
-		_click(goblin)
+	if await _reach(alternative):
+		_click(alternative)
 		await _settle()
+	_check(prompt.visible and prompt.text == "Choose a target for Test Ember Spark" and requests == [&""],
+		"choosing a status card shows a prompt and emits no command")
 	if await _reach(targeted):
 		_click(targeted)
 		await _settle()
-	_check(goblin.button_pressed and prompt.text == "Target: Goblin" and requests == [&"", &"goblin"],
-		"viewport plays send an empty target for Block and the instance ID for a targeted card")
+	_check(prompt.visible and prompt.text == "Choose a target for Test Toxic Spark" and requests == [&""],
+		"choosing another targeted card replaces the pending card")
+	if await _reach(goblin):
+		_click(goblin)
+		await _settle()
+	_check(not prompt.visible and goblin.disabled and requests == [&"", &"goblin"],
+		"the target click emits the selected enemy ID and dismisses targeting")
+	if await _reach(targeted):
+		_click(targeted)
+		await _settle()
 	goblin_state.hp = 0
 	session.snapshot = ViewSnapshot.build(state, THREE_ENEMIES, NAMES[0])
 	session.snapshot["encounter_id"] = 1
 	session.changed.emit()
 	await _settle()
 	goblin.pressed.emit()
-	targeted.pressed.emit()
 	_check(goblin.disabled and "Defeated" in goblin.text and "Intent" not in goblin.text and
-		prompt.text.begins_with("Choose an enemy") and not goblin.button_pressed and
-		targeted.disabled and requests.size() == 2, "defeated targets clear selection and prevent stale card requests")
+		prompt.visible and not treant.disabled and requests.size() == 2,
+		"a target defeated by a teammate is rejected while remaining targets stay available")
+	if await _reach(treant):
+		_click(treant)
+		await _settle()
+	if await _reach(targeted):
+		_click(targeted)
+		await _settle()
 
 	state.enemy_state(&"treant").hp = 0
 	session.snapshot = ViewSnapshot.build(state, THREE_ENEMIES, NAMES[0])
 	session.snapshot["encounter_id"] = 1
 	session.changed.emit()
 	await _settle()
+	_check(prompt.visible and requests == [&"", &"goblin", &"treant"],
+		"a pending card stays unspent if the enemy roster shrinks to one")
 	if await _reach(targeted):
 		_click(targeted)
 		await _settle()
-	_check(prompt.text == "Target: Slime" and requests == [&"", &"goblin", &"slime"],
-		"the sole living enemy becomes the visible target without another click")
+	_check(not prompt.visible and requests.size() == 3,
+		"clicking the pending card again cancels even after the roster shrinks")
+	if await _reach(targeted):
+		_click(targeted)
+		await _settle()
+	_check(not prompt.visible and requests == [&"", &"goblin", &"treant", &"slime"],
+		"a card click submits immediately when only one enemy survives")
 
 	var next_state := CombatState.new(THREE_ENEMIES, THREE_ENEMIES.shuffle_seed, NAMES, -1,
 		{NAMES[0]: ENCOUNTER.test_deck})
 	session.snapshot = ViewSnapshot.build(next_state, THREE_ENEMIES, NAMES[0])
+	session.snapshot["encounter_id"] = 1
+	session.changed.emit()
+	await _settle()
+	if await _reach(targeted):
+		_click(targeted)
+		await _settle()
+	_check(prompt.visible, "the same round can start another pending selection")
+	session.snapshot = session.snapshot.duplicate()
 	session.snapshot["encounter_id"] = 2
 	session.changed.emit()
 	await _settle()
-	_check(prompt.text.begins_with("Choose an enemy") and _card(combat, "Test Toxic Spark").disabled,
-		"a new encounter clears the previous selection even when enemy IDs are reused")
+	_check(not prompt.visible and not _card(combat, "Test Toxic Spark").disabled,
+		"a new encounter clears the pending card even when enemy and card IDs are reused")
 	_check_control(_control(combat, "%EndTurnButton"), "network enemy picker after targeting")
 	combat.network_card_requested.disconnect(record_target)
 	combat.network_card_requested.connect(session.submit_card)
+
+
+func _test_network_ready(session: NetworkSession, combat: Control) -> void:
+	var state := CombatState.new(THREE_ENEMIES, THREE_ENEMIES.shuffle_seed, NAMES)
+	state.end_turn(NAMES[0])
+	session.snapshot = ViewSnapshot.build(state, THREE_ENEMIES, NAMES[0])
+	session.snapshot["encounter_id"] = 2
+	session.changed.emit()
+	await _settle()
+	var end := _control(combat, "%EndTurnButton") as Button
+	var hand := _control(combat, "%HandCards")
+	_check(end.text == "Undo Ready · Battle Mage 1" and hand.get_child_count() == 5
+		and hand.get_children().all(func(card: Button) -> bool: return card.disabled),
+		"network Ready retains the disabled private hand and displays Undo Ready")
+	_check_control(end, "network Undo Ready")
+	combat.network_undo_ready_requested.disconnect(session.submit_undo_ready)
+	var undos: Array[bool] = []
+	var record_undo := func(): undos.append(true)
+	combat.network_undo_ready_requested.connect(record_undo)
+	_click(end)
+	await _settle()
+	_check(undos.size() == 1, "network Undo Ready emits its own command from viewport input")
+	combat.network_undo_ready_requested.disconnect(record_undo)
+	combat.network_undo_ready_requested.connect(session.submit_undo_ready)
 
 
 func _test_long_hand(session: NetworkSession, combat: Control, snapshot: Dictionary) -> void:
@@ -379,15 +479,17 @@ func _settle() -> void:
 		await process_frame
 
 
-func _click(control: Control) -> void:
+func _click(control: Control, double_click := false) -> void:
 	var position := control.get_global_rect().get_center()
 	var event := InputEventMouseButton.new()
 	event.button_index = MOUSE_BUTTON_LEFT
 	event.position = position
 	event.global_position = position
 	event.pressed = true
+	event.double_click = double_click
 	_viewport.push_input(event, true)
 	event.pressed = false
+	event.double_click = false
 	_viewport.push_input(event, true)
 
 

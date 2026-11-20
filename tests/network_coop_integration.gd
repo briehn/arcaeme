@@ -198,14 +198,14 @@ func _probe_commands(view: Dictionary) -> bool:
 	if not _verified_wrong_player:
 		_probe_expected = Authority.Result.WRONG_PLAYER
 		_session.rpc_id(NetworkSession.SERVER_ID, &"_request_command", {
-			"actor": "Battle Mage 1", "round": view.round, "phase": view.phase,
+			"actor": "Battle Mage 1", "round": view.round, "phase": view.phase, "ready_epoch": view.ready_epoch,
 			"sequence": 1, "kind": int(Authority.Command.END_TURN),
 		})
 		return true
 	if view.revision > 0 and not _verified_duplicate:
 		_probe_expected = Authority.Result.DUPLICATE
 		_session.rpc_id(NetworkSession.SERVER_ID, &"_request_command", {
-			"actor": view.viewer, "round": view.round, "phase": view.phase,
+			"actor": view.viewer, "round": view.round, "phase": view.phase, "ready_epoch": view.ready_epoch,
 			"sequence": 1, "kind": int(Authority.Command.END_TURN),
 		})
 		return true

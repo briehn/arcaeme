@@ -6,7 +6,7 @@ const ViewSnapshot = preload("res://scripts/combat/combat_view_snapshot.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
 
-enum Command { PLAY_CARD, END_TURN, REWARD }
+enum Command { PLAY_CARD, END_TURN, REWARD, UNDO_READY }
 enum Result { ACCEPTED, UNKNOWN_PEER, MALFORMED, WRONG_PLAYER, DUPLICATE, STALE_TURN, ILLEGAL_ACTION }
 
 var _encounter: EncounterData
@@ -65,7 +65,11 @@ func submit(peer_id: int, request: Variant) -> Result:
 		_state = _run.active_combat
 		_run_revision += 1
 		return Result.ACCEPTED
-	if request["round"] != _state.round_number or request["phase"] != _state.phase or _state.phase != CombatState.Phase.PLAYER:
+	# A different seat's accepted action need not invalidate a current play. A change
+	# in this seat's readiness does invalidate commands that preceded that change.
+	if (request["round"] != _state.round_number or request["phase"] != _state.phase
+			or _state.phase != CombatState.Phase.PLAYER
+			or request["ready_epoch"] != _state.players[player_id].ready_epoch):
 		return Result.STALE_TURN
 	if not _play_combat_command(player_id, request):
 		return Result.ILLEGAL_ACTION
@@ -78,15 +82,14 @@ func submit(peer_id: int, request: Variant) -> Result:
 func _play_combat_command(player_id: StringName, request: Dictionary) -> bool:
 	if request["kind"] == Command.END_TURN:
 		return _state.end_turn(player_id)
+	if request["kind"] == Command.UNDO_READY:
+		return _state.undo_ready(player_id)
 	var copy_id: int = request["copy"]
 	if _run != null:
 		copy_id += _state.players[player_id].first_copy_id
 	if not _state.players[player_id].hand.has(copy_id):
 		return false
 	var target := StringName(request.get("target", ""))
-	# Older single-enemy callers can still omit the target field.
-	if not request.has("target") and _state.enemies.size() == 1 and _state.card_data(copy_id).targets_enemy():
-		target = _state.enemies[0].id
 	return _state.play_card(player_id, copy_id, target)
 
 
@@ -101,12 +104,14 @@ func _valid_shape(request: Dictionary) -> bool:
 		return _run != null and request.size() == 5 and request.get("reward_id") is String
 	if not request.get("round") is int or request["round"] <= 0 or not request.get("phase") is int:
 		return false
+	if not request.get("ready_epoch") is int or request["ready_epoch"] < 0:
+		return false
 	var run_fields := 1 if _run != null else 0
 	match request["kind"]:
 		Command.PLAY_CARD:
 			var target_fields := 1 if request.has("target") else 0
-			return request.size() == 6 + run_fields + target_fields and request.get("copy") is int \
+			return request.size() == 7 + run_fields + target_fields and request.get("copy") is int \
 				and (not request.has("target") or request["target"] is String)
-		Command.END_TURN:
-			return request.size() == 5 + run_fields
+		Command.END_TURN, Command.UNDO_READY:
+			return request.size() == 6 + run_fields
 	return false

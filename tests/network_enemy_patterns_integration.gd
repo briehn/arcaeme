@@ -117,7 +117,7 @@ func _verify_state(view: Dictionary) -> bool:
 		var ended := defeated or index < previous_ended
 		valid = (valid and player.id == "Battle Mage %d" % (index + 1)
 			and player.hp == maxi(0, 36 - damage) and player.ended_turn == ended
-			and player.mana == (0 if ended else 3) and player.block == 0)
+			and player.mana == (0 if player.hp == 0 else 3) and player.block == 0)
 	var log_attacks := 0
 	for entry in view.log:
 		if entry.begins_with(_enemy.name + " attacks for "):
@@ -128,7 +128,7 @@ func _verify_state(view: Dictionary) -> bool:
 	var hud_valid := (enemy_label.text.begins_with(_enemy.name)
 		and (defeated or ("Attack all living players for %d damage each" % attack) in enemy_label.text))
 	valid = valid and log_attacks == attacks_completed and hud_valid
-	valid = valid and view.hand.size() == (0 if defeated or _seat <= previous_ended else 5)
+	valid = valid and view.hand.size() == (0 if defeated else 5)
 	if not valid:
 		_fail("Unexpected pattern, HP, turn, or HUD at revision %d: %s" % [revision, view])
 	return valid

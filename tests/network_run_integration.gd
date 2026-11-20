@@ -519,7 +519,8 @@ func _drive_boss(view: Dictionary) -> void:
 			if _probe_index == 3:
 				request.merge({"kind": int(Authority.Command.REWARD), "reward_id": _chosen_reward})
 			else:
-				request.merge({"kind": int(Authority.Command.END_TURN), "round": view.round, "phase": view.phase})
+				request.merge({"kind": int(Authority.Command.END_TURN), "round": view.round, "phase": view.phase,
+					"ready_epoch": view.ready_epoch})
 			_probe(view, Authority.Result.STALE_TURN, request)
 		return
 	if not _boss_reported:

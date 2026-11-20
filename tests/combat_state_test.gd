@@ -186,10 +186,12 @@ func _test_battle_preparation() -> void:
 	_check(party.enemy_hp == party_data.enemy_max_hp - 6 and mage.next_attack_bonus == 3,
 		"an ally's Attack does not receive or consume the owner's bonus")
 	party.end_turn(MAGE)
-	_check(mage.next_attack_bonus == 0 and party.round_number == 1 and
-		"Battle Mage's next Attack bonus expired at turn end." in party.combat_log,
-		"preparation expires at the owner's turn end while the shared phase is still active")
+	_check(mage.next_attack_bonus == 3 and party.round_number == 1 and
+		"Battle Mage's next Attack bonus expired at turn end." not in party.combat_log,
+		"preparation remains available if the Mage undoes Ready")
 	party.end_turn(ALLY)
+	_check(mage.next_attack_bonus == 0 and "Battle Mage's next Attack bonus expired at turn end." in party.combat_log,
+		"preparation expires when the party closes the shared phase")
 	party.play_card(MAGE, _find_copy(party, &"basic_strike"), party_data.enemy_id)
 	_check(party.enemy_hp == party_data.enemy_max_hp - 12, "the owner's Attack next turn has no expired bonus")
 
@@ -239,10 +241,10 @@ func _test_shared_phase() -> void:
 	var ally_opening_hand := ally.hand.duplicate()
 	state.play_card(MAGE, _find_copy(state, &"basic_block"), &"")
 	state.end_turn(MAGE)
-	_check(mage.mana == 0 and mage.block == 5 and state.round_number == 1 and ally.hp == 9,
-		"ending one player expires their Mana and waits with their Block intact")
-	_check(mage.hand.is_empty() and mage.discard_pile.has(unplayed) and ally.hand == ally_opening_hand and
-		ally.discard_pile.is_empty(), "turn end must clear only the owner's unplayed cards before the enemy phase")
+	_check(mage.mana == 2 and mage.block == 5 and state.round_number == 1 and ally.hp == 9,
+		"ready leaves the owner's Mana and Block intact while waiting")
+	_check(mage.hand == [unplayed] and not mage.discard_pile.has(unplayed) and ally.hand == ally_opening_hand and
+		ally.discard_pile.is_empty(), "ready preserves both hands until the shared player phase closes")
 	_check(not state.end_turn(MAGE) and ally.mana == 3, "an ended actor cannot end twice or spend ally Mana")
 	state.end_turn(ALLY)
 	_check(mage.hp == 5 and ally.hp == 0, "one enemy attack hits all living players against independent Block")

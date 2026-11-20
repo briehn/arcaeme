@@ -172,12 +172,19 @@ func _reward_request(snapshot: Dictionary, sequence: int, card_id: String) -> Di
 
 
 func _play_request(snapshot: Dictionary, sequence: int, copy: int) -> Dictionary:
-	return {"actor": snapshot.viewer, "sequence": sequence, "round": snapshot.round, "phase": snapshot.phase,
+	var request := {"actor": snapshot.viewer, "sequence": sequence, "round": snapshot.round, "phase": snapshot.phase,
+		"ready_epoch": snapshot.ready_epoch,
 		"kind": int(Authority.Command.PLAY_CARD), "copy": copy}
+	for card in snapshot.hand:
+		if card.copy == copy and card.targets_enemy:
+			request["target"] = snapshot.enemies[0].id
+			break
+	return request
 
 
 func _end_request(snapshot: Dictionary, sequence: int) -> Dictionary:
 	return {"actor": snapshot.viewer, "sequence": sequence, "round": snapshot.round, "phase": snapshot.phase,
+		"ready_epoch": snapshot.ready_epoch,
 		"kind": int(Authority.Command.END_TURN)}
 
 
