@@ -5,6 +5,7 @@ signal strokes_changed
 const GUIDE_COLOR := Color(0.54, 0.81, 0.9, 0.85)
 const GUIDE_TEXT := Color(0.94, 0.97, 1.0)
 const INK_COLOR := Color(1.0, 0.84, 0.54)
+const INK_WIDTH := 5.5
 const SURFACE_COLOR := Color(0.08, 0.11, 0.17)
 const FRAME_COLOR := Color(0.31, 0.42, 0.55)
 const MIN_POINT_DISTANCE_SQUARED := 0.000004
@@ -12,6 +13,7 @@ const MIN_POINT_DISTANCE_SQUARED := 0.000004
 var _guide: Array[PackedVector2Array] = []
 var _strokes: Array[PackedVector2Array] = []
 var _current := PackedVector2Array()
+var _drawing_enabled := false
 
 
 func set_guide(guide: Array[PackedVector2Array]) -> void:
@@ -29,11 +31,20 @@ func has_completed_strokes() -> bool:
 	return not _strokes.is_empty() and _current.is_empty()
 
 
-func completed_strokes() -> Array[PackedVector2Array]:
-	return _strokes.duplicate()
+func set_drawing_enabled(enabled: bool) -> void:
+	_drawing_enabled = enabled
+
+
+func completed_strokes(include_in_progress := false) -> Array[PackedVector2Array]:
+	var strokes := _strokes.duplicate()
+	if include_in_progress and _current.size() > 1:
+		strokes.append(_current.duplicate())
+	return strokes
 
 
 func _gui_input(event: InputEvent) -> void:
+	if not _drawing_enabled:
+		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		accept_event()
 		if event.pressed:
@@ -110,7 +121,8 @@ func _draw() -> void:
 		var wing := direction.orthogonal() * 5.0
 		draw_colored_polygon(PackedVector2Array([tip, tip - direction * 13.0 + wing,
 			tip - direction * 13.0 - wing]), GUIDE_COLOR)
-		draw_circle(stroke[0], 10.0, SURFACE_COLOR)
+		# Leave underlying guide geometry visible where a new stroke joins it.
+		draw_circle(stroke[0], 10.0, Color(SURFACE_COLOR, 0.68))
 		draw_arc(stroke[0], 10.0, 0.0, TAU, 20, GUIDE_COLOR, 1.4, true)
 		var number := str(index + 1)
 		var number_width := font.get_string_size(number, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
@@ -126,5 +138,6 @@ func _draw_ink(stroke: PackedVector2Array) -> void:
 		return
 	var points := _local_points(stroke)
 	if points.size() > 1:
-		draw_polyline(points, INK_COLOR, 3.0, true)
-	draw_circle(points[-1], 2.5, INK_COLOR)
+		draw_polyline(points, INK_COLOR, INK_WIDTH, true)
+		draw_circle(points[0], INK_WIDTH * 0.5, INK_COLOR, true, -1.0, true)
+	draw_circle(points[-1], INK_WIDTH * 0.5, INK_COLOR, true, -1.0, true)

@@ -3,23 +3,75 @@ extends RefCounted
 const SAMPLE_COUNT := 24
 const MIN_STROKE_LENGTH_RATIO := 0.55
 const MAX_STROKE_LENGTH_RATIO := 1.60
+const MIN_PRIMARY_BEND := 0.12
+const PREFIX_FRACTIONS := [0.60, 0.70, 0.80, 0.90, 1.00]
+const PREFIX_SCORE_MARGIN := 0.08
 
 
-## A score of zero rejects the cast. Positive scores indicate a match, with one exact.
+class MatchResult:
+	var score: float
+	var complete: bool
+
+	func _init(match_score: float, is_complete: bool) -> void:
+		score = match_score
+		complete = is_complete
+
+
+## Null rejects the drawing. A recognizable prefix always resolves in the lowest quality tier.
 static func recognize(template_strokes: Array[PackedVector2Array], drawn_strokes: Array[PackedVector2Array],
-		min_extent: float, tolerance: float) -> float:
-	if (template_strokes.is_empty() or drawn_strokes.size() != template_strokes.size()
-			or not is_finite(tolerance) or tolerance <= 0.0
-			or not is_finite(min_extent) or min_extent < 0.0):
-		return 0.0
-	var template_bounds := _bounds(template_strokes)
+		min_extent: float, tolerance: float, min_coverage: float) -> MatchResult:
+	if (drawn_strokes.is_empty() or drawn_strokes.size() > template_strokes.size()
+			or not is_finite(tolerance) or tolerance <= 0.0):
+		return null
 	var drawing_bounds := _bounds(drawn_strokes)
+	var drawing_extent := _extent(drawing_bounds)
+	if is_zero_approx(drawing_extent) or drawing_extent < min_extent:
+		return null
+	# Even a generous fit cannot turn a straight swipe into a rune whose outline turns.
+	var primary := template_strokes[0]
+	if _normalized_bend(primary) >= MIN_PRIMARY_BEND and _normalized_bend(drawn_strokes[0]) < MIN_PRIMARY_BEND:
+		return null
+
+	var full_score := 0.0
+	if drawn_strokes.size() == template_strokes.size():
+		full_score = _match_score(template_strokes, drawn_strokes, drawing_bounds, tolerance)
+	if is_equal_approx(full_score, 1.0):
+		return MatchResult.new(full_score, true)
+
+	var guide_length := 0.0
+	for stroke in template_strokes:
+		if stroke.size() < 2:
+			return null
+		guide_length += _distances(stroke)[-1]
+	var final_index := drawn_strokes.size() - 1
+	var prefix := template_strokes.slice(0, final_index)
+	var prefix_length := 0.0
+	for stroke in prefix:
+		prefix_length += _distances(stroke)[-1]
+	var last_stroke := template_strokes[final_index]
+	var distances := _distances(last_stroke)
+	var prefix_score := 0.0
+	for fraction: float in PREFIX_FRACTIONS:
+		if fraction == 1.0 and drawn_strokes.size() == template_strokes.size():
+			continue
+		var cutoff := distances[-1] * fraction
+		if prefix_length + cutoff < guide_length * min_coverage - 0.00001:
+			continue
+		prefix.append(_cut_stroke(last_stroke, distances, cutoff))
+		prefix_score = maxf(prefix_score, _match_score(prefix, drawn_strokes, drawing_bounds, tolerance))
+		prefix.pop_back()
+	if prefix_score > 0.0 and (full_score <= 0.0 or prefix_score > full_score + PREFIX_SCORE_MARGIN):
+		return MatchResult.new(prefix_score, false)
+	return MatchResult.new(full_score, true) if full_score > 0.0 else null
+
+
+static func _match_score(template_strokes: Array[PackedVector2Array], drawn_strokes: Array[PackedVector2Array],
+		drawing_bounds: Rect2, tolerance: float) -> float:
+	var template_bounds := _bounds(template_strokes)
 	var template_extent := _extent(template_bounds)
 	var drawing_extent := _extent(drawing_bounds)
-	if (is_zero_approx(template_extent) or is_zero_approx(drawing_extent)
-			or drawing_extent < min_extent):
+	if is_zero_approx(template_extent):
 		return 0.0
-
 	var error := 0.0
 	for index in template_strokes.size():
 		var template_path := template_strokes[index]
@@ -41,6 +93,37 @@ static func recognize(template_strokes: Array[PackedVector2Array], drawn_strokes
 			return 0.0
 		error = maxf(error, stroke_error)
 	return 1.0 - error / tolerance
+
+
+static func _normalized_bend(stroke: PackedVector2Array) -> float:
+	if stroke.size() < 2:
+		return 0.0
+	var bounds := _bounds([stroke])
+	var extent := _extent(bounds)
+	if is_zero_approx(extent):
+		return 0.0
+	var chord := stroke[-1] - stroke[0]
+	var direction := chord.normalized()
+	var bend := 0.0
+	for point in stroke:
+		var offset := point - stroke[0]
+		var gap := offset.length() if chord.length_squared() < 0.001 else absf(offset.cross(direction))
+		bend = maxf(bend, gap)
+	return bend / extent
+
+
+static func _cut_stroke(stroke: PackedVector2Array, distances: PackedFloat32Array,
+		cutoff: float) -> PackedVector2Array:
+	if cutoff >= distances[-1]:
+		return stroke
+	var prefix := PackedVector2Array([stroke[0]])
+	for index in range(1, stroke.size()):
+		if distances[index] >= cutoff:
+			var ratio := inverse_lerp(distances[index - 1], distances[index], cutoff)
+			prefix.append(stroke[index - 1].lerp(stroke[index], ratio))
+			break
+		prefix.append(stroke[index])
+	return prefix
 
 
 static func _bounds(strokes: Array[PackedVector2Array]) -> Rect2:
@@ -93,4 +176,4 @@ static func _path_error(expected: PackedVector2Array, drawn: PackedVector2Array)
 		squared_error += expected[index].distance_squared_to(drawn[index])
 	var start_error := expected[0].distance_to(drawn[0])
 	var end_error := expected[SAMPLE_COUNT - 1].distance_to(drawn[SAMPLE_COUNT - 1])
-	return maxf(sqrt(squared_error / SAMPLE_COUNT), maxf(start_error, end_error) * 0.75)
+	return maxf(sqrt(squared_error / SAMPLE_COUNT), maxf(start_error, end_error) * 0.45)

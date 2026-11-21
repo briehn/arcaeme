@@ -15,8 +15,7 @@ const RuneTemplate = preload("res://scripts/combat/rune_template.gd")
 @export var description_override: String
 ## Prototype assignments. Unassigned regular cards retain their instant path for this playtest.
 @export var rune_template: RuneTemplate
-## A nonempty stroke marks an instant prototype Booster.
-@export var spell_booster_stroke := PackedVector2Array()
+@export var is_spell_booster := false
 
 
 func description() -> String:

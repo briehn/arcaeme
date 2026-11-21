@@ -35,8 +35,8 @@ func _initialize() -> void:
 
 func _test_matching() -> void:
 	_check(SETTINGS.test_deck == [STRIKE, BLOCK, SALVO, BOOSTER, PREP], "the isolated fixture includes all three runes")
-	_check(STRIKE.rune_template != BLOCK.rune_template and STRIKE.rune_template.cast_time_ms == 6500
-		and BLOCK.rune_template.cast_time_ms == 6500 and SALVO.rune_template.cast_time_ms == 9500,
+	_check(STRIKE.rune_template != BLOCK.rune_template and STRIKE.rune_template.cast_time_ms == 10000
+		and BLOCK.rune_template.cast_time_ms == 10000 and SALVO.rune_template.cast_time_ms == 14000,
 		"Basic Attack and Basic Block have different shared templates; the multi-stroke rune has more time")
 	for card in [STRIKE, BLOCK, SALVO]:
 		var guide: Array[PackedVector2Array] = card.rune_template.strokes
@@ -45,8 +45,20 @@ func _test_matching() -> void:
 			"%s tolerates translation, scale, and dense input" % card.display_name)
 		_check(_score(guide, []) == 0.0, "empty drawing fails")
 	var salvo: Array[PackedVector2Array] = SALVO.rune_template.strokes
-	_check(_score(salvo, [salvo[1], salvo[0]]) == 0.0
-		and _score(salvo, [salvo[0]]) == 0.0, "matching requires both Salvo strokes in order")
+	var outline := _recognize(salvo, [salvo[0]])
+	_check(_score(salvo, [salvo[1], salvo[0]]) == 0.0 and outline != null and not outline.complete,
+		"swapped strokes reject while the recognizable outline is incomplete")
+	var arm := PackedVector2Array([STRIKE.rune_template.strokes[0][0], STRIKE.rune_template.strokes[0][1]])
+	_check(_score(STRIKE.rune_template.strokes, [arm]) == 0.0,
+		"a long straight swipe cannot replace a rune corner")
+	var slight_curve := PackedVector2Array([Vector2(0.31, 0.20), Vector2(0.45, 0.34),
+		Vector2(0.59, 0.44), Vector2(0.63, 0.51), Vector2(0.48, 0.62), Vector2(0.32, 0.72)])
+	var curve := _recognize(STRIKE.rune_template.strokes, [slight_curve])
+	_check(curve != null and curve.complete and curve.score >= SETTINGS.acceptable_score,
+		"a realistic curved and off-endpoint trace retains at least ordinary power")
+	var scribble := PackedVector2Array([Vector2(0.28, 0.20), Vector2(0.75, 0.2), Vector2(0.28, 0.40),
+		Vector2(0.75, 0.50), Vector2(0.28, 0.70), Vector2(0.75, 0.80)])
+	_check(_score(STRIKE.rune_template.strokes, [scribble]) == 0.0, "a large unrelated zigzag cannot cast")
 	var reversed := STRIKE.rune_template.strokes[0].duplicate()
 	reversed.reverse()
 	_check(_score(STRIKE.rune_template.strokes, [reversed]) == 0.0
@@ -57,11 +69,32 @@ func _test_matching() -> void:
 	_check(_score(STRIKE.rune_template.strokes, [tiny]) == 0.0
 		and _score(STRIKE.rune_template.strokes, [malformed]) == 0.0,
 		"tiny and malformed drawings fail")
-	var score := _score(STRIKE.rune_template.strokes, _rough_strike())
-	_check(score > 0.0 and score < SETTINGS.clean_score, "a plausible rough stroke falls inside the accepted rough tier")
-	_check(SETTINGS.power_percent(0.79999, false) == 85 and SETTINGS.power_percent(0.80, false) == 100
-		and SETTINGS.power_percent(1.0, true) == 120 and SETTINGS.power_percent(score, true) == 105,
-		"accuracy cutoff and booster arithmetic are exact")
+	_check(SETTINGS.quality(0.39999, true) == "Faint" and SETTINGS.quality(0.40, true) == "Acceptable"
+		and SETTINGS.quality(0.81999, true) == "Acceptable" and SETTINGS.quality(0.82, true) == "Excellent"
+		and SETTINGS.quality(1.0, false) == "Faint", "accuracy cutoffs and partial cap are exact")
+	_check(SETTINGS.power_percent("Faint", false) == 75 and SETTINGS.power_percent("Acceptable", false) == 100
+		and SETTINGS.power_percent("Excellent", false) == 110 and SETTINGS.power_percent("Faint", true) == 95
+		and SETTINGS.power_percent("Acceptable", true) == 120 and SETTINGS.power_percent("Excellent", true) == 130,
+		"all three quality tiers and Booster arithmetic are exact")
+	for card in [STRIKE, BLOCK, SALVO]:
+		var rune = card.rune_template
+		var connected := false
+		for stroke: PackedVector2Array in rune.strokes:
+			for index in range(1, stroke.size()):
+				connected = connected or Geometry2D.segment_intersects_segment(stroke[index - 1], stroke[index],
+					rune.booster_stroke[0], rune.booster_stroke[1]) != null
+				for endpoint: Vector2 in rune.booster_stroke:
+					connected = connected or Geometry2D.get_closest_point_to_segment(
+						endpoint, stroke[index - 1], stroke[index]).distance_to(endpoint) < 0.0001
+		_check(connected, "%s augmentation connects to its guide" % card.display_name)
+		var combat := _combat()
+		combat.play_card(MAGE, _copy(combat, BOOSTER), &"")
+		var cast := _start(combat, _copy(combat, card), FIRST if card.is_attack else &"")
+		_check(not cast.is_empty() and cast.guide[-1] == rune.booster_stroke
+			and combat.submit_spell_cast(MAGE, cast.guide, NOW + 1) == CombatState.CastResult.SUCCESS
+			and combat.action_history.back().spell_power_percent == 130
+			and not combat.players[MAGE].spell_booster_primed,
+			"%s resolves its exact augmented guide and consumes its Booster" % card.display_name)
 
 
 func _test_cast_transaction() -> void:
@@ -74,35 +107,37 @@ func _test_cast_transaction() -> void:
 	var intent := combat.enemy_state(SECOND).intent()
 	_check(combat.can_play_card(MAGE, copy, SECOND) and not combat.play_card(MAGE, copy, SECOND),
 		"a playable assigned card cannot use the immediate native resolver entry point")
-	_check(combat.begin_spell_cast(MAGE, copy, &"", NOW).is_empty()
-		and combat.begin_spell_cast(MAGE, copy, &"wrong", NOW).is_empty()
-		and combat.begin_spell_cast(&"Stranger", copy, SECOND, NOW).is_empty(), "reject absent target and wrong owner")
-	var cast := combat.begin_spell_cast(MAGE, copy, SECOND, NOW)
+	_check(_start(combat, copy, &"").is_empty()
+		and _start(combat, copy, &"wrong").is_empty()
+		and combat.begin_spell_cast(&"Stranger", copy, SECOND).is_empty(), "reject absent target and wrong owner")
+	var cast := combat.begin_spell_cast(MAGE, copy, SECOND)
 	if not _check(not cast.is_empty(), "legal begin returns a cast"):
 		return
-	_check(cast.deadline_ms == 7500 and not combat.can_end_turn(MAGE)
-		and combat.begin_spell_cast(MAGE, copy, FIRST, NOW).is_empty(),
-		"one pending cast blocks End Turn and a replacement begin")
-	_check(not combat.expire_spell_cast(MAGE, 7499) and combat.cancel_spell_cast(MAGE)
-		and not combat.cancel_spell_cast(MAGE), "cancel is clean, single-use, and early expiry does not clear")
-	combat.begin_spell_cast(MAGE, copy, SECOND, NOW)
-	_check(combat.submit_spell_cast(MAGE, [], NOW + 1) == CombatState.CastResult.INCOMPLETE,
-		"blank drawings can retry without resolving")
-	combat.begin_spell_cast(MAGE, copy, SECOND, NOW)
+	_check(combat.submit_spell_cast(MAGE, cast.guide, NOW) == CombatState.CastResult.NO_CAST
+		and combat.expire_spell_cast(MAGE, cast.guide, NOW + 50000) == CombatState.CastResult.NO_CAST
+		and not combat.can_end_turn(MAGE) and combat.begin_spell_cast(MAGE, copy, FIRST).is_empty(),
+		"the pending cast holds combat, but cannot submit or expire before the surface is ready")
+	_check(combat.start_spell_cast_clock(MAGE, NOW + 100) == NOW + 10100
+		and combat.start_spell_cast_clock(MAGE, NOW + 101) == -1
+		and combat.expire_spell_cast(MAGE, cast.guide, NOW + 10099) == CombatState.CastResult.NO_CAST
+		and combat.cancel_spell_cast(MAGE) and not combat.cancel_spell_cast(MAGE),
+		"the full window starts once at readiness and cancellation is single-use")
+	_start(combat, copy, SECOND)
+	_check(combat.submit_spell_cast(MAGE, [], NOW + 1) == CombatState.CastResult.MISDRAWN,
+		"blank drawings never resolve")
+	_start(combat, copy, SECOND)
 	_check(combat.submit_spell_cast(MAGE, BLOCK.rune_template.strokes, NOW + 1) == CombatState.CastResult.MISDRAWN,
 		"a different rune does not resolve the card")
-	var presentation := combat.begin_spell_cast(MAGE, copy, SECOND, NOW)
+	var presentation := _start(combat, copy, SECOND)
 	var display_stroke: PackedVector2Array = presentation.guide[0]
 	display_stroke.clear()
 	_check(not STRIKE.rune_template.strokes[0].is_empty() and combat.cancel_spell_cast(MAGE),
 		"the drawing display cannot mutate the shared template")
-	combat.begin_spell_cast(MAGE, copy, SECOND, NOW)
-	_check(combat.submit_spell_cast(MAGE, cast.guide, 7500) == CombatState.CastResult.EXPIRED,
-		"a drawing submitted exactly at the deadline expires")
-	combat.begin_spell_cast(MAGE, copy, SECOND, NOW)
-	_check(combat.expire_spell_cast(MAGE, 7501) and not combat.expire_spell_cast(MAGE, 7501),
-		"deadline update expires once")
-	combat.begin_spell_cast(MAGE, copy, SECOND, NOW)
+	_start(combat, copy, SECOND)
+	_check(combat.expire_spell_cast(MAGE, [], NOW + 10000) == CombatState.CastResult.EXPIRED
+		and combat.expire_spell_cast(MAGE, cast.guide, NOW + 10001) == CombatState.CastResult.NO_CAST,
+		"blank expiry clears the cast exactly once")
+	_start(combat, copy, SECOND)
 	combat.enemy_state(SECOND).hp = 0
 	_check(combat.submit_spell_cast(MAGE, cast.guide, NOW + 1) == CombatState.CastResult.INVALID,
 		"the intended target is checked again before spending")
@@ -113,15 +148,22 @@ func _test_cast_transaction() -> void:
 
 	actor.strength = 2
 	actor.next_attack_bonus = 3
-	combat.begin_spell_cast(MAGE, copy, SECOND, NOW)
-	_check(combat.submit_spell_cast(MAGE, _rough_strike(), NOW + 1) == CombatState.CastResult.SUCCESS,
-		"a rough accepted rune resolves")
+	_start(combat, copy, SECOND)
+	_check(combat.expire_spell_cast(MAGE, _partial_strike(), NOW + 10000) == CombatState.CastResult.SUCCESS,
+		"a recognizable partial drawing resolves at the deadline")
 	_check(actor.mana == 2 and copy not in actor.hand and actor.discard_pile.count(copy) == 1
-		and combat.action_history.size() == 1 and combat.action_history[0].spell_power_percent == 85
+		and combat.action_history.size() == 1 and combat.action_history[0].spell_power_percent == 75
 		and combat.enemy_state(SECOND).hp == 12 and combat.enemy_state(FIRST).hp == 18
 		and actor.next_attack_bonus == 0, "only base damage scales; spend happens once and remains bound to target")
 	_check(combat.submit_spell_cast(MAGE, cast.guide, NOW + 2) == CombatState.CastResult.NO_CAST and actor.mana == 2,
 		"duplicate submission cannot spend Mana or replay the card")
+	combat = _combat()
+	_start(combat, _copy(combat, STRIKE), FIRST)
+	var ordinary: Array[PackedVector2Array] = [PackedVector2Array([Vector2(0.33, 0.18),
+		Vector2(0.50, 0.34), Vector2(0.58, 0.43), Vector2(0.62, 0.56), Vector2(0.48, 0.66), Vector2(0.32, 0.75)])]
+	_check(combat.submit_spell_cast(MAGE, ordinary, NOW + 1) == CombatState.CastResult.SUCCESS
+		and combat.action_history.back().spell_power_percent == 100 and combat.enemy_hp == 12,
+		"an imperfect but acceptable Strike resolves at 100% without a retry")
 
 
 func _test_block_and_bypass() -> void:
@@ -129,28 +171,28 @@ func _test_block_and_bypass() -> void:
 	var actor := combat.players[MAGE]
 	var copy := _copy(combat, BLOCK)
 	actor.dexterity = 2
-	_check(combat.begin_spell_cast(MAGE, copy, FIRST, NOW).is_empty()
-		and not combat.begin_spell_cast(MAGE, copy, &"", NOW).is_empty(), "self-only Block rejects an enemy target")
+	_check(_start(combat, copy, FIRST).is_empty()
+		and not _start(combat, copy, &"").is_empty(), "self-only Block rejects an enemy target")
 	_check(combat.submit_spell_cast(MAGE, BLOCK.rune_template.strokes, NOW + 1) == CombatState.CastResult.SUCCESS
-		and actor.block == 7 and actor.mana == 2, "clean Block gets full base power plus Dexterity")
+		and actor.block == 8 and actor.mana == 2, "excellent Block rounds base power before adding Dexterity")
 	combat = _combat()
 	actor = combat.players[MAGE]
 	actor.dexterity = 2
-	combat.begin_spell_cast(MAGE, _copy(combat, BLOCK), &"", NOW)
+	_start(combat, _copy(combat, BLOCK), &"")
 	var rough_block: Array[PackedVector2Array] = [
-		PackedVector2Array([Vector2(0.25, 0.28), Vector2(0.56, 0.69), Vector2(0.75, 0.28)]),
+		PackedVector2Array([Vector2(0.25, 0.28), Vector2(0.50, 0.69), Vector2(0.6425, 0.4563)]),
 	]
 	_check(combat.submit_spell_cast(MAGE, rough_block, NOW + 1) == CombatState.CastResult.SUCCESS
-		and actor.block == 6 and combat.action_history.back().spell_power_percent == 85,
+		and actor.block == 6 and combat.action_history.back().spell_power_percent == 75,
 		"a rough cast scales the Block grant before adding full Dexterity")
 
 	var bypass := _combat([STRIKE, BLOCK, BOOSTER], [MAGE], {}, true, true)
-	_check(bypass.begin_spell_cast(MAGE, _copy(bypass, STRIKE), FIRST, NOW).is_empty()
+	_check(bypass.begin_spell_cast(MAGE, _copy(bypass, STRIKE), FIRST).is_empty()
 		and bypass.play_card(MAGE, _copy(bypass, BLOCK), &"") and bypass.players[MAGE].block == 5,
 		"test bypass uses exact unpenalized power without opening a cast")
 	_check(bypass.play_card(MAGE, _copy(bypass, BOOSTER), &"")
 		and bypass.play_card(MAGE, _copy(bypass, STRIKE), FIRST) and bypass.enemy_hp == 11
-		and bypass.players[MAGE].spell_booster_stroke.is_empty(), "bypass still exercises one full-power booster resolution")
+		and not bypass.players[MAGE].spell_booster_primed, "bypass still exercises one full-power booster resolution")
 	var legacy := _combat([STRIKE, BLOCK, SALVO], [MAGE], {}, false)
 	_check(legacy.play_card(MAGE, _copy(legacy, STRIKE), FIRST)
 		and legacy.play_card(MAGE, _copy(legacy, SALVO), SECOND)
@@ -162,57 +204,68 @@ func _test_booster_and_ordered_hits() -> void:
 	var combat := _combat([BOOSTER, BOOSTER, SALVO, PREP, STRIKE], [MAGE], {MAGE: Arcana.TOWER})
 	var actor := combat.players[MAGE]
 	_check(combat.play_card(MAGE, _copy(combat, BOOSTER), &"") and actor.mana == 2
-		and not actor.spell_booster_stroke.is_empty(), "the Booster spends one Mana and resolves instantly")
+		and actor.spell_booster_primed, "the Booster spends one Mana and resolves instantly")
 	_check(not combat.play_card(MAGE, _copy(combat, BOOSTER), &"") and actor.mana == 2,
 		"another Booster cannot stack or pay while primed")
-	_check(combat.play_card(MAGE, _copy(combat, PREP), &"") and not actor.spell_booster_stroke.is_empty()
-		and combat.end_turn(MAGE) and not actor.spell_booster_stroke.is_empty(),
+	_check(combat.play_card(MAGE, _copy(combat, PREP), &"") and actor.spell_booster_primed
+		and combat.end_turn(MAGE) and actor.spell_booster_primed,
 		"an unassigned card and round closure preserve the one pending booster")
 	var salvo := _copy(combat, SALVO)
-	var cast := combat.begin_spell_cast(MAGE, salvo, SECOND, NOW)
+	var cast := _start(combat, salvo, SECOND)
 	if not _check(not cast.is_empty(), "ready Booster allows Salvo to start"):
 		return
-	_check(cast.boosted and cast.guide.size() == 3 and cast.guide[2] == BOOSTER.spell_booster_stroke,
+	_check(cast.boosted and cast.guide.size() == 3 and cast.guide[2] == SALVO.rune_template.booster_stroke,
 		"the third stroke appears in the cast guide")
-	_check(combat.submit_spell_cast(MAGE, SALVO.rune_template.strokes, NOW + 1) == CombatState.CastResult.INCOMPLETE
-		and not actor.spell_booster_stroke.is_empty() and actor.mana == 3, "missing booster stroke leaves it primed")
-	combat.begin_spell_cast(MAGE, salvo, SECOND, NOW)
-	_check(combat.cancel_spell_cast(MAGE) and not actor.spell_booster_stroke.is_empty(), "canceling a boosted cast retains it")
-	combat.begin_spell_cast(MAGE, salvo, SECOND, NOW)
-	_check(combat.submit_spell_cast(MAGE, cast.guide, cast.deadline_ms) == CombatState.CastResult.EXPIRED
-		and not actor.spell_booster_stroke.is_empty(), "expiry retains the Booster")
+	_check(combat.cancel_spell_cast(MAGE) and actor.spell_booster_primed, "canceling a boosted cast retains it")
+	_start(combat, salvo, SECOND)
+	_check(combat.expire_spell_cast(MAGE, [], cast.deadline_ms) == CombatState.CastResult.EXPIRED
+		and actor.spell_booster_primed, "expiry retains the Booster")
 	actor.strength = 2
 	actor.next_attack_bonus = 3
 	combat.enemy_state(SECOND).hp = 50
 	combat.enemy_state(SECOND).block = 4
-	combat.begin_spell_cast(MAGE, salvo, SECOND, NOW)
+	_start(combat, salvo, SECOND)
 	_check(combat.submit_spell_cast(MAGE, cast.guide, NOW + 1) == CombatState.CastResult.SUCCESS
-		and actor.mana == 1 and actor.discard_pile.count(salvo) == 1 and actor.spell_booster_stroke.is_empty(),
+		and actor.mana == 1 and actor.discard_pile.count(salvo) == 1 and not actor.spell_booster_primed,
 		"successful boosted cast consumes the exact card and Booster once")
-	_check(combat.enemy_state(SECOND).hp == 26 and combat.enemy_state(FIRST).hp == 18
+	_check(combat.enemy_state(SECOND).hp == 24 and combat.enemy_state(FIRST).hp == 18
 		and actor.burning == 3 and actor.next_attack_bonus == 0,
 		"two rounded base hits preserve Strength, preparation, mitigation, Tower, and target order")
 	var strike := _copy(combat, STRIKE)
-	cast = combat.begin_spell_cast(MAGE, strike, SECOND, NOW)
+	cast = _start(combat, strike, SECOND)
 	if _check(not cast.is_empty(), "a follow-up card can cast immediately"):
 		_check(cast.guide.size() == 1 and not cast.boosted, "the consumable stroke is absent from the following rune")
 		combat.cancel_spell_cast(MAGE)
 	var fresh := _combat()
-	_check(BOOSTER.spell_booster_stroke.size() == 2 and fresh.play_card(MAGE, _copy(fresh, BOOSTER), &""),
+	_check(BOOSTER.is_spell_booster and SALVO.rune_template.booster_stroke.size() == 2 and fresh.play_card(MAGE, _copy(fresh, BOOSTER), &""),
 		"consumption never clears the shared card resource")
+	var base_only := _start(fresh, _copy(fresh, SALVO), SECOND)
+	_check(base_only.boosted and fresh.submit_spell_cast(MAGE, SALVO.rune_template.strokes, NOW + 1)
+		== CombatState.CastResult.SUCCESS and fresh.players[MAGE].spell_booster_primed
+		and fresh.players[MAGE].mana == 0 and fresh.action_history.back().spell_power_percent == 75,
+		"a recognizable base rune with no augmentation resolves faint and keeps the Booster")
+	fresh = _combat()
+	fresh.play_card(MAGE, _copy(fresh, BOOSTER), &"")
+	var attempted := _start(fresh, _copy(fresh, SALVO), SECOND)
+	var strokes: Array[PackedVector2Array] = SALVO.rune_template.strokes.duplicate()
+	strokes.append(PackedVector2Array([Vector2(0.50, 0.19), Vector2(0.50, 0.21)]))
+	_check(fresh.expire_spell_cast(MAGE, strokes, attempted.deadline_ms) == CombatState.CastResult.SUCCESS
+		and fresh.players[MAGE].spell_booster_primed and fresh.players[MAGE].mana == 0
+		and fresh.action_history.back().spell_power_percent == 75,
+		"expiry salvages the recognizable base rune when the extra stroke is too short")
 
 
 func _test_local_ownership() -> void:
 	var combat := _combat([STRIKE, BLOCK, BOOSTER], [MAGE, ALLY])
 	var copy := _copy(combat, STRIKE)
-	_check(combat.begin_spell_cast(ALLY, copy, FIRST, NOW).is_empty(), "one seat cannot start another seat's card")
+	_check(combat.begin_spell_cast(ALLY, copy, FIRST).is_empty(), "one seat cannot start another seat's card")
 	combat.play_card(MAGE, _copy(combat, BOOSTER), &"")
-	var cast := combat.begin_spell_cast(MAGE, copy, FIRST, NOW)
+	var cast := _start(combat, copy, FIRST)
 	if not _check(not cast.is_empty(), "local caster has an active rune"):
 		return
 	_check(combat.submit_spell_cast(ALLY, cast.guide, NOW + 1) == CombatState.CastResult.NO_CAST
 		and not combat.cancel_spell_cast(ALLY) and not combat.end_turn(ALLY)
-		and combat.players[ALLY].spell_booster_stroke.is_empty(),
+		and not combat.players[ALLY].spell_booster_primed,
 		"another local seat cannot complete or clear the cast or receive its boost")
 	_check(combat.cancel_spell_cast(MAGE) and combat.end_turn(MAGE) and combat.can_undo_ready(MAGE)
 		and combat.undo_ready(MAGE) and combat.round_number == 1, "normal Ready and Undo Ready resume after cancellation")
@@ -222,14 +275,14 @@ func _test_encounter_outcomes() -> void:
 	var combat := _combat()
 	combat.enemy_state(FIRST).hp = 0
 	combat.enemy_state(SECOND).hp = 6
-	combat.begin_spell_cast(MAGE, _copy(combat, STRIKE), SECOND, NOW)
+	_start(combat, _copy(combat, STRIKE), SECOND)
 	_check(combat.submit_spell_cast(MAGE, STRIKE.rune_template.strokes, NOW + 1) == CombatState.CastResult.SUCCESS
 		and combat.phase == CombatState.Phase.VICTORY and not combat.can_end_turn(MAGE),
 		"a lethal drawn card immediately follows the usual victory path")
 	combat = _combat()
 	combat.players[MAGE].hp = 1
-	combat.begin_spell_cast(MAGE, _copy(combat, BLOCK), &"", NOW)
-	_check(combat.expire_spell_cast(MAGE, 7500) and combat.end_turn(MAGE)
+	_start(combat, _copy(combat, BLOCK), &"")
+	_check(combat.expire_spell_cast(MAGE, [], NOW + 10000) == CombatState.CastResult.EXPIRED and combat.end_turn(MAGE)
 		and combat.phase == CombatState.Phase.DEFEAT and combat.players[MAGE].block == 0,
 		"ending the turn after an expired Block follows the usual defeat path")
 
@@ -249,8 +302,16 @@ func _copy(combat: CombatState, card: CardData) -> int:
 	return -1
 
 
-func _rough_strike() -> Array[PackedVector2Array]:
-	return [PackedVector2Array([Vector2(0.28, 0.20), Vector2(0.62, 0.56), Vector2(0.29, 0.70)])]
+func _start(combat: CombatState, copy: int, target: StringName) -> Dictionary:
+	var cast := combat.begin_spell_cast(MAGE, copy, target)
+	if not cast.is_empty():
+		cast.deadline_ms = combat.start_spell_cast_clock(MAGE, NOW)
+	return cast
+
+
+func _partial_strike() -> Array[PackedVector2Array]:
+	var guide: PackedVector2Array = STRIKE.rune_template.strokes[0]
+	return [PackedVector2Array([guide[0], guide[1], guide[1].lerp(guide[2], 0.57)])]
 
 
 func _resampled(strokes: Array[PackedVector2Array]) -> Array[PackedVector2Array]:
@@ -266,7 +327,13 @@ func _resampled(strokes: Array[PackedVector2Array]) -> Array[PackedVector2Array]
 
 
 func _score(guide: Array[PackedVector2Array], drawing: Array[PackedVector2Array]) -> float:
-	return Matcher.recognize(guide, drawing, SETTINGS.minimum_extent, SETTINGS.recognition_tolerance)
+	var recognized := _recognize(guide, drawing)
+	return recognized.score if recognized != null else 0.0
+
+
+func _recognize(guide: Array[PackedVector2Array], drawing: Array[PackedVector2Array]) -> Matcher.MatchResult:
+	return Matcher.recognize(guide, drawing, SETTINGS.minimum_extent, SETTINGS.recognition_tolerance,
+		SETTINGS.minimum_coverage)
 
 
 func _check(condition: bool, message: String) -> bool:

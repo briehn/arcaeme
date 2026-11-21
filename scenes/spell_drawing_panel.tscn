@@ -81,6 +81,7 @@ custom_minimum_size = Vector2(88, 0)
 layout_mode = 2
 theme_override_font_sizes/font_size = 24
 horizontal_alignment = 2
+tooltip_text = "When time runs out, the game checks the strokes drawn so far."
 
 [node name="RuneName" type="Label" parent="Margin/Panel/Content"]
 unique_name_in_owner = true
@@ -89,7 +90,7 @@ theme_override_colors/font_color = Color(0.73, 0.88, 0.98, 1)
 
 [node name="Instructions" type="Label" parent="Margin/Panel/Content"]
 layout_mode = 2
-text = "Trace the numbered arrows in order. Lift the mouse between strokes."
+text = "Trace the arrows. Lift between strokes. Time up submits."
 
 [node name="RuneCanvas" type="Control" parent="Margin/Panel/Content"]
 unique_name_in_owner = true

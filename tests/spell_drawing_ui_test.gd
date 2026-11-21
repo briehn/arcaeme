@@ -1,7 +1,9 @@
 extends SceneTree
 
 const CombatView = preload("res://scripts/combat.gd")
+const CardData = preload("res://scripts/combat/card_data.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
+const RuneTemplate = preload("res://scripts/combat/rune_template.gd")
 const RuneCanvas = preload("res://scripts/ui/rune_canvas.gd")
 const MENU = preload("res://scenes/main.tscn")
 const SOLO = preload("res://scenes/combat.tscn")
@@ -10,9 +12,10 @@ const TWO_SLIMES = preload("res://resources/prototype/enemies/two_slimes.tres")
 const DRAWING_SETTINGS = preload("res://resources/prototype/spell_drawing_settings.tres")
 const ASTRA = preload("res://resources/prototype/cards/expansion/astral_salvo.tres")
 const BLOCK = preload("res://resources/prototype/cards/basic_block.tres")
-const BOOSTER = preload("res://resources/prototype/cards/spell_ink_booster.tres")
+const STRIKE = preload("res://resources/prototype/cards/basic_strike.tres")
 const FIRST_TARGET := &"slime_1"
 const SECOND_TARGET := &"slime_2"
+const SHORT_CAST_MS := 800
 const VIEWPORT_SIZES := [Vector2i(960, 540), Vector2i(1024, 576), Vector2i(1280, 720), Vector2i(1920, 1080)]
 
 var _viewport: SubViewport
@@ -31,6 +34,7 @@ func _run() -> void:
 		root.add_child(_viewport)
 		await _test_menu()
 		await _test_solo()
+		await _test_expiry()
 		await _test_local()
 		await _test_bypass()
 		_viewport.queue_free()
@@ -67,11 +71,23 @@ func _test_solo() -> void:
 	var cast_button := panel.get_node("%SubmitButton") as Button
 	var guide_label := panel.get_node("%RuneName") as Label
 	var end_turn := combat.get_node("%EndTurnButton") as Button
+	var surface_signal := {"count": 0, "remaining_ms": 0}
+	panel.connect(&"cast_surface_ready", func():
+		surface_signal.count += 1
+		surface_signal.remaining_ms = int(panel.get("_deadline_ms")) - Time.get_ticks_msec()
+	)
 
 	await _click(_card(combat, "Basic Strike"))
 	_check(not panel.visible and combat.get_node("%TargetLabel").visible,
 		"attack selects an enemy before opening the rune overlay")
-	await _click(combat._enemy_buttons[SECOND_TARGET])
+	await _click(combat._enemy_buttons[SECOND_TARGET], false)
+	_check(panel.visible and surface_signal.count == 0 and int(panel.get("_deadline_ms")) == 0
+		and not canvas._drawing_enabled, "the preparation frame keeps both the clock and input idle")
+	await _settle()
+	_check(surface_signal.count == 1 and canvas._drawing_enabled
+		and surface_signal.remaining_ms > STRIKE.rune_template.cast_time_ms - 500
+		and surface_signal.remaining_ms <= STRIKE.rune_template.cast_time_ms,
+		"the usable surface starts the full timer once")
 	_check(panel.visible and guide_label.text == "Strike Rune" and cast_button.disabled and end_turn.disabled,
 		"target opens the rune overlay with timer, blank cast disabled, and End Turn locked")
 	_check(player.mana == 3 and player.hand.size() == 5 and state.action_history.is_empty(),
@@ -92,28 +108,68 @@ func _test_solo() -> void:
 	_check(player.mana == 3 and player.hand.size() == 5 and state.enemy_state(SECOND_TARGET).hp == 22,
 		"cancel retains the card, Mana, and target HP")
 
+	await _click(_card(combat, "Basic Strike"))
+	await _click(combat._enemy_buttons[SECOND_TARGET])
+	_draw_stroke(canvas, PackedVector2Array([
+		Vector2(0.15, 0.72), Vector2(0.83, 0.22), Vector2(0.24, 0.22),
+		Vector2(0.83, 0.82), Vector2(0.13, 0.40),
+	]))
+	await _click(cast_button)
+	_check(not panel.visible and "unrecognized" in combat.spell_feedback.text.to_lower(),
+		"an unrelated mouse drawing reports failed recognition")
+	_check(player.mana == 3 and player.hand.size() == 5 and state.action_history.is_empty(),
+		"an unrecognized cast keeps its card and Mana and records no action")
+
 	await _click(_card(combat, "Spell Ink Booster"))
 	_check(not panel.visible and player.mana == 2 and player.hand.size() == 4
 		and "extra stroke" in combat.spell_feedback.text, "Booster resolves instantly and primes an extra stroke")
 	await _select_salvo(combat)
 	_check(panel.visible and "extra stroke" in guide_label.text and canvas._guide.size() == 3
-		and canvas._guide[-1] == BOOSTER.spell_booster_stroke, "the boosted Salvo visibly includes its third stroke")
-	_draw_stroke(canvas, ASTRA.rune_template.strokes[0])
-	await _click(cast_button)
-	_check(not panel.visible and "incomplete" in combat.spell_feedback.text and player.mana == 2
-		and player.hand.size() == 4, "partial Salvo reports incomplete and retains its card and Mana")
-	await _select_salvo(combat)
-	_check(panel.visible and "extra stroke" in guide_label.text, "the extra stroke survives an incomplete cast")
-	for stroke in ASTRA.rune_template.strokes:
+		and canvas._guide[-1] == ASTRA.rune_template.booster_stroke
+		and _connects_to_rune(canvas._guide), "the boosted Salvo visibly includes its connected third stroke")
+	for stroke in canvas._guide:
 		_draw_stroke(canvas, stroke)
-	_draw_stroke(canvas, BOOSTER.spell_booster_stroke)
 	await _click(cast_button)
-	_check(not panel.visible and "120% base power" in combat.spell_feedback.text, "the mouse-drawn boosted Salvo succeeds")
-	_check(state.enemy_state(FIRST_TARGET).hp == 18 and state.enemy_state(SECOND_TARGET).hp == 6,
-		"both 8-damage hits resolve against only the selected enemy")
+	_check(not panel.visible and "excellent" in combat.spell_feedback.text.to_lower()
+		and "130% base power" in combat.spell_feedback.text, "the mouse-drawn boosted Salvo reports excellent accuracy")
+	_check(state.enemy_state(FIRST_TARGET).hp == 18 and state.enemy_state(SECOND_TARGET).hp == 4,
+		"both 9-damage hits resolve against only the selected enemy")
 	_check(player.mana == 0 and player.hand.size() == 3 and player.discard_pile.size() == 2
-		and player.spell_booster_stroke.is_empty() and state.action_history.size() == 2,
+		and not player.spell_booster_primed and state.action_history.size() == 2,
 		"successful cast spends Mana, moves its card, and consumes the booster once")
+	combat.queue_free()
+	await _settle()
+
+
+func _test_expiry() -> void:
+	var combat := await _open_combat(SOLO, false, SHORT_CAST_MS)
+	var state := combat._state
+	var player = state.players[CombatView.PLAYER_ID]
+	var panel := combat.get_node("SpellDrawingPanel") as Control
+	var canvas := panel.get_node("%RuneCanvas") as RuneCanvas
+	await _click(_card(combat, "Spell Ink Booster"))
+	await _select_salvo(combat)
+	_check(panel.visible and canvas._guide.size() == 3 and player.mana == 2,
+		"the short expiry fixture starts a primed cast with its card and Mana reserved")
+	var outline: PackedVector2Array = ASTRA.rune_template.strokes[0]
+	_draw_stroke(canvas, outline, false)
+	var release_position := canvas.get_global_transform_with_canvas() * canvas._local_points(outline)[-1]
+	_check((panel.get_node("%SubmitButton") as Button).disabled,
+		"the captured outline is still held rather than submitted manually")
+	var deadline := Time.get_ticks_msec() + SHORT_CAST_MS + 2500
+	while panel.visible and Time.get_ticks_msec() < deadline:
+		await process_frame
+	_check(not panel.visible and "time up" in combat.spell_feedback.text.to_lower()
+		and "75% base power" in combat.spell_feedback.text,
+		"expiry recognizes the held outline as a partial spell with reduced power")
+	_check(state.enemy_state(FIRST_TARGET).hp == 18 and state.enemy_state(SECOND_TARGET).hp == 12
+		and player.mana == 0 and player.hand.size() == 3 and player.discard_pile.size() == 2
+		and player.spell_booster_primed and state.action_history.size() == 2,
+		"partial expiry resolves both hits, spends once, and preserves the undrawn booster")
+	_mouse_button(release_position, false)
+	await _settle()
+	_check(not panel.visible and state.enemy_state(SECOND_TARGET).hp == 12 and state.action_history.size() == 2,
+		"releasing after automatic resolution cannot reopen or resolve the spell again")
 	combat.queue_free()
 	await _settle()
 
@@ -132,8 +188,8 @@ func _test_local() -> void:
 		"Mage 2 sees their own rune without Mage 1's booster")
 	_draw_stroke(panel.get_node("%RuneCanvas"), BLOCK.rune_template.strokes[0])
 	await _click(panel.get_node("%SubmitButton"))
-	_check(player_two.block == 5 and player_two.mana == 2 and player_one.block == 0
-		and not player_one.spell_booster_stroke.is_empty(), "Block and booster state stay with their respective Mages")
+	_check(player_two.block == 6 and player_two.mana == 2 and player_one.block == 0
+		and player_one.spell_booster_primed, "excellent Block and the booster stay with their respective Mages")
 	await _click(combat.get_node("%EndTurnButton"))
 	_check(player_two.ended_turn and not player_one.ended_turn and state.round_number == 1,
 		"the local Mage can Ready normally after casting")
@@ -151,10 +207,16 @@ func _test_bypass() -> void:
 	await _settle()
 
 
-func _open_combat(scene: PackedScene, bypass := false) -> CombatView:
+func _open_combat(scene: PackedScene, bypass := false, salvo_duration_ms := 0) -> CombatView:
 	var combat := scene.instantiate() as CombatView
 	var fixture: EncounterData = TWO_SLIMES.duplicate()
 	fixture.test_deck = DRAWING_SETTINGS.test_deck.duplicate()
+	if salvo_duration_ms > 0:
+		var salvo: CardData = ASTRA.duplicate()
+		var rune: RuneTemplate = ASTRA.rune_template.duplicate()
+		rune.cast_time_ms = salvo_duration_ms
+		salvo.rune_template = rune
+		fixture.test_deck[fixture.test_deck.find(ASTRA)] = salvo
 	combat.encounter = fixture
 	combat.spell_drawing = DRAWING_SETTINGS
 	combat.bypass_drawing = bypass
@@ -175,7 +237,22 @@ func _card(combat: CombatView, title: String) -> Button:
 	return null
 
 
-func _draw_stroke(canvas: RuneCanvas, stroke: PackedVector2Array) -> void:
+func _connects_to_rune(guide: Array[PackedVector2Array]) -> bool:
+	var extra := guide[-1]
+	for path_index in range(guide.size() - 1):
+		var base := guide[path_index]
+		for index in range(1, base.size()):
+			for extra_index in range(1, extra.size()):
+				if Geometry2D.segment_intersects_segment(base[index - 1], base[index],
+						extra[extra_index - 1], extra[extra_index]) != null:
+					return true
+				for tip in [extra[extra_index - 1], extra[extra_index]]:
+					if tip.distance_to(Geometry2D.get_closest_point_to_segment(tip, base[index - 1], base[index])) < 0.001:
+						return true
+	return false
+
+
+func _draw_stroke(canvas: RuneCanvas, stroke: PackedVector2Array, release := true) -> void:
 	var points := canvas._local_points(stroke)
 	var transform := canvas.get_global_transform_with_canvas()
 	_mouse_button(transform * points[0], true)
@@ -185,7 +262,8 @@ func _draw_stroke(canvas: RuneCanvas, stroke: PackedVector2Array) -> void:
 		event.position = transform * points[index]
 		event.global_position = event.position
 		_viewport.push_input(event, true)
-	_mouse_button(transform * points[-1], false)
+	if release:
+		_mouse_button(transform * points[-1], false)
 
 
 func _mouse_button(position: Vector2, pressed: bool) -> void:
@@ -197,7 +275,7 @@ func _mouse_button(position: Vector2, pressed: bool) -> void:
 	_viewport.push_input(event, true)
 
 
-func _click(control: Control) -> void:
+func _click(control: Control, settle := true) -> void:
 	if control == null:
 		_check(false, "missing control")
 		return
@@ -211,7 +289,8 @@ func _click(control: Control) -> void:
 	var position := control.get_global_rect().get_center()
 	_mouse_button(position, true)
 	_mouse_button(position, false)
-	await _settle()
+	if settle:
+		await _settle()
 
 
 func _fully_visible(control: Control) -> bool:

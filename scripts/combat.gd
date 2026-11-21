@@ -10,6 +10,11 @@ const SpellDrawingPanel = preload("res://scripts/ui/spell_drawing_panel.gd")
 const SPELL_DRAWING_PANEL = preload("res://scenes/spell_drawing_panel.tscn")
 const PLAYER_ID := &"Battle Mage"
 const TARGET_HIGHLIGHT := Color(0.98, 0.84, 0.56)
+const CAST_FEEDBACK_COLORS := {
+	"Faint": Color("#f4ca87"),
+	"Acceptable": Color("#abdff1"),
+	"Excellent": Color("#b4edc1"),
+}
 
 signal encounter_finished(combat: CombatState)
 signal network_card_requested(copy_id: int, target_id: StringName)
@@ -322,7 +327,7 @@ func _on_player_selected(player_id: StringName) -> void:
 	if player_id != _selected_player_id:
 		_selected_player_id = player_id
 		if spell_drawing != null:
-			spell_feedback.text = _spell_drawing_hint()
+			_reset_spell_feedback()
 		_render()
 
 
@@ -353,7 +358,7 @@ func _render_hand(hand: Array, input_allowed: bool) -> void:
 				var rune := definition.rune_template
 				if rune != null and not bypass_drawing:
 					button.tooltip_text += "\nRune required: " + rune.display_name
-				elif not definition.spell_booster_stroke.is_empty():
+				elif definition.is_spell_booster:
 					button.tooltip_text += "\nSuccessful cast bonus: +%d percentage points." % spell_drawing.booster_bonus_percent
 			button.pressed.connect(_on_card_pressed.bind(copy_id))
 			hand_cards.add_child(button)
@@ -418,51 +423,64 @@ func _submit_card(copy_id: int, target: StringName) -> void:
 		network_card_requested.emit(copy_id, target)
 		return
 	if _state.requires_rune(copy_id):
-		var cast := _state.begin_spell_cast(_selected_player_id, copy_id, target, Time.get_ticks_msec())
+		var cast := _state.begin_spell_cast(_selected_player_id, copy_id, target)
 		_render()
 		if not cast.is_empty():
 			_casting_copy = copy_id
 			var rune_name := String(cast.rune_name) + (" · extra stroke" if cast.boosted else "")
-			_spell_panel.open_cast(cast.card_name, rune_name, cast.guide, cast.deadline_ms)
+			_spell_panel.open_cast(cast.card_name, rune_name, cast.guide)
 		return
 	var played := _state.play_card(_selected_player_id, copy_id, target)
 	if played and spell_drawing != null:
-		spell_feedback.text = _spell_drawing_hint()
+		_reset_spell_feedback()
 	_render()
 
 
 func _setup_spell_drawing() -> void:
 	spell_feedback.show()
-	spell_feedback.text = _spell_drawing_hint()
+	_reset_spell_feedback()
 	if bypass_drawing:
 		return
 	_spell_panel = SPELL_DRAWING_PANEL.instantiate()
 	add_child(_spell_panel)
 	_spell_panel.drawing_submitted.connect(_on_drawing_submitted)
+	_spell_panel.cast_surface_ready.connect(_on_cast_surface_ready)
 	_spell_panel.cast_canceled.connect(_on_cast_canceled)
 	_spell_panel.cast_expired.connect(_on_cast_expired)
 
 
-func _spell_drawing_hint() -> String:
+func _reset_spell_feedback() -> void:
+	spell_feedback.remove_theme_color_override(&"font_color")
 	if bypass_drawing:
-		return "Spell Drawing (Prototype) · Test bypass uses full power."
-	if not _state.players[_selected_player_id].spell_booster_stroke.is_empty():
-		return "Booster ready · The next spell with a rune has an extra stroke."
-	return "Spell Drawing (Prototype) · Basic Strike, Basic Block, and Astral Salvo use runes. Other cards are instant for this test."
+		spell_feedback.text = "Spell Drawing (Prototype) · Test bypass uses full power."
+	elif _state.players[_selected_player_id].spell_booster_primed:
+		spell_feedback.text = "Booster ready · Trace the connected extra stroke to use its bonus."
+	else:
+		spell_feedback.text = "Spell Drawing (Prototype) · Basic Strike, Basic Block, and Astral Salvo use runes. Other cards are instant for this test."
+
+
+func _on_cast_surface_ready() -> void:
+	var deadline := _state.start_spell_cast_clock(_selected_player_id, Time.get_ticks_msec())
+	if deadline >= 0:
+		_spell_panel.start_timer(deadline)
 
 
 func _on_drawing_submitted(strokes: Array[PackedVector2Array]) -> void:
-	var result := _state.submit_spell_cast(_selected_player_id, strokes, Time.get_ticks_msec())
+	_show_cast_result(_state.submit_spell_cast(_selected_player_id, strokes, Time.get_ticks_msec()), false)
+
+
+func _show_cast_result(result: CombatState.CastResult, timed_out: bool) -> void:
 	match result:
 		CombatState.CastResult.SUCCESS:
-			var power: int = _state.action_history.back()[&"spell_power_percent"]
-			_finish_cast("Cast successful · %d%% base power." % power)
-		CombatState.CastResult.INCOMPLETE:
-			_finish_cast("Cast incomplete · Card and Mana kept.")
+			var action: Dictionary = _state.action_history.back()
+			var prefix := "Time up · " if timed_out else ""
+			var quality: String = action[&"spell_quality"]
+			_finish_cast("%s%s cast · %d%% base power." % [
+				prefix, quality, action[&"spell_power_percent"]], CAST_FEEDBACK_COLORS[quality])
 		CombatState.CastResult.MISDRAWN:
-			_finish_cast("Rune didn’t match · Card and Mana kept.")
+			_finish_cast("Rune unrecognized · Card and Mana kept.")
 		CombatState.CastResult.EXPIRED:
-			_finish_cast("Cast expired · Card and Mana kept.")
+			_finish_cast("Time up · Rune unrecognized. Card and Mana kept.")
 		_:
 			_finish_cast("Cast no longer available · Card and Mana kept.")
 
@@ -472,15 +490,15 @@ func _on_cast_canceled() -> void:
 		_finish_cast("Cast canceled · Card and Mana kept.")
 
 
-func _on_cast_expired() -> void:
-	if _state.expire_spell_cast(_selected_player_id, Time.get_ticks_msec()):
-		_finish_cast("Cast expired · Card and Mana kept.")
+func _on_cast_expired(strokes: Array[PackedVector2Array]) -> void:
+	_show_cast_result(_state.expire_spell_cast(_selected_player_id, strokes, Time.get_ticks_msec()), true)
 
 
-func _finish_cast(message: String) -> void:
+func _finish_cast(message: String, color := Color("#edc0b3")) -> void:
 	var copy_id := _casting_copy
 	_casting_copy = -1
 	spell_feedback.text = message
+	spell_feedback.add_theme_color_override(&"font_color", color)
 	_render()
 	var button: Button = _card_buttons.get(copy_id)
 	if button != null and not button.disabled:

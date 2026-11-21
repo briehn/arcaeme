@@ -6,4 +6,5 @@
 script = ExtResource("1_rune")
 display_name = "Block Rune"
 strokes = Array[PackedVector2Array]([PackedVector2Array(0.25, 0.28, 0.50, 0.69, 0.75, 0.28)])
-cast_time_ms = 6500
+booster_stroke = PackedVector2Array(0.35, 0.444, 0.65, 0.444)
+cast_time_ms = 10000

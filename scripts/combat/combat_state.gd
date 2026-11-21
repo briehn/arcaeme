@@ -11,7 +11,7 @@ const RuneMatcher = preload("res://scripts/combat/rune_matcher.gd")
 const SpellDrawingSettings = preload("res://scripts/combat/spell_drawing_settings.gd")
 
 enum Phase { PLAYER, ENEMY, VICTORY, DEFEAT }
-enum CastResult { NO_CAST, SUCCESS, INCOMPLETE, MISDRAWN, EXPIRED, INVALID }
+enum CastResult { NO_CAST, SUCCESS, MISDRAWN, EXPIRED, INVALID }
 
 const TURN_MANA := 3
 const TURN_DRAW := 5
@@ -37,7 +37,7 @@ class PlayerState:
 	var arcana_saw_attack: bool
 	var arcana_saw_non_attack: bool
 	var recovered_after_victory: bool
-	var spell_booster_stroke := PackedVector2Array()
+	var spell_booster_primed := false
 	var first_copy_id: int
 	var hand: Array[int] = []
 	var draw_pile: Array[int] = []
@@ -48,7 +48,7 @@ class PendingCast:
 	var player_id: StringName
 	var copy_id: int
 	var target_id: StringName
-	var deadline_ms: int
+	var deadline_ms := -1
 	var guide: Array[PackedVector2Array]
 	var boosted: bool
 
@@ -169,7 +169,7 @@ func can_play_card(player_id: StringName, copy_id: int, target_id: StringName) -
 	var card := card_data(copy_id)
 	if player.mana < card.mana_cost:
 		return false
-	if not card.spell_booster_stroke.is_empty() and (_spell_drawing == null or not player.spell_booster_stroke.is_empty()):
+	if card.is_spell_booster and (_spell_drawing == null or player.spell_booster_primed):
 		return false
 	if not card.targets_enemy():
 		return target_id == &""
@@ -183,9 +183,10 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 	var player := players[player_id]
 	var card := card_data(copy_id)
 	if _spell_drawing != null and card.rune_template != null:
-		var boosted := not player.spell_booster_stroke.is_empty()
+		var boosted := player.spell_booster_primed and card.rune_template.booster_stroke.size() >= 2
 		var power := 100 + (_spell_drawing.booster_bonus_percent if boosted else 0)
-		player.spell_booster_stroke = PackedVector2Array()
+		if boosted:
+			player.spell_booster_primed = false
 		_resolve_card(player, copy_id, target_id, power)
 	else:
 		_resolve_card(player, copy_id, target_id)
@@ -197,7 +198,7 @@ func requires_rune(copy_id: int) -> bool:
 		and card_data(copy_id).rune_template != null)
 
 
-func begin_spell_cast(player_id: StringName, copy_id: int, target_id: StringName, now_ms: int) -> Dictionary:
+func begin_spell_cast(player_id: StringName, copy_id: int, target_id: StringName) -> Dictionary:
 	if not can_play_card(player_id, copy_id, target_id) or not requires_rune(copy_id):
 		return {}
 	var card := card_data(copy_id)
@@ -206,47 +207,59 @@ func begin_spell_cast(player_id: StringName, copy_id: int, target_id: StringName
 	cast.player_id = player_id
 	cast.copy_id = copy_id
 	cast.target_id = target_id
-	cast.deadline_ms = now_ms + template.cast_time_ms
 	cast.guide = template.strokes.duplicate()
-	var booster := players[player_id].spell_booster_stroke
-	cast.boosted = not booster.is_empty()
+	cast.boosted = players[player_id].spell_booster_primed and template.booster_stroke.size() >= 2
 	if cast.boosted:
-		cast.guide.append(booster)
+		cast.guide.append(template.booster_stroke)
 	_pending_cast = cast
 	var display_guide: Array[PackedVector2Array] = []
 	for stroke in cast.guide:
 		display_guide.append(stroke.duplicate())
 	return {"card_name": card.display_name, "rune_name": template.display_name,
-		"guide": display_guide, "deadline_ms": cast.deadline_ms, "boosted": cast.boosted}
+		"guide": display_guide, "boosted": cast.boosted}
+
+
+func start_spell_cast_clock(player_id: StringName, now_ms: int) -> int:
+	if _pending_cast == null or _pending_cast.player_id != player_id or _pending_cast.deadline_ms >= 0:
+		return -1
+	var template := card_data(_pending_cast.copy_id).rune_template
+	_pending_cast.deadline_ms = now_ms + template.cast_time_ms
+	return _pending_cast.deadline_ms
 
 
 func submit_spell_cast(player_id: StringName, strokes: Array[PackedVector2Array], now_ms: int) -> CastResult:
-	if _pending_cast == null or _pending_cast.player_id != player_id:
+	if _pending_cast == null or _pending_cast.player_id != player_id or _pending_cast.deadline_ms < 0:
 		return CastResult.NO_CAST
 	var cast := _pending_cast
 	_pending_cast = null
-	if now_ms >= cast.deadline_ms:
-		return CastResult.EXPIRED
 	if not can_play_card(player_id, cast.copy_id, cast.target_id):
 		return CastResult.INVALID
-	if strokes.size() < cast.guide.size():
-		return CastResult.INCOMPLETE
-	for stroke in strokes:
-		if stroke.size() < 2:
-			return CastResult.INCOMPLETE
-	var score := RuneMatcher.recognize(cast.guide, strokes, _spell_drawing.minimum_extent,
-		_spell_drawing.recognition_tolerance)
-	if score <= 0.0:
-		return CastResult.MISDRAWN
+	var boosted := cast.boosted and strokes.size() == cast.guide.size()
+	var base_guide := card_data(cast.copy_id).rune_template.strokes
+	var recognized := _match_spell_rune(cast.guide if boosted else base_guide, strokes)
+	if boosted and recognized == null:
+		# A failed added stroke can leave enough ink for the ordinary spell.
+		recognized = _match_spell_rune(base_guide, strokes.slice(0, base_guide.size()))
+		boosted = false
+	if recognized == null:
+		return CastResult.EXPIRED if now_ms >= cast.deadline_ms else CastResult.MISDRAWN
+	var quality := _spell_drawing.quality(recognized.score, recognized.complete and (not cast.boosted or boosted))
 	var player := players[player_id]
-	if cast.boosted:
-		player.spell_booster_stroke = PackedVector2Array()
-	_resolve_card(player, cast.copy_id, cast.target_id, _spell_drawing.power_percent(score, cast.boosted))
+	if boosted:
+		player.spell_booster_primed = false
+	_resolve_card(player, cast.copy_id, cast.target_id, _spell_drawing.power_percent(quality, boosted), quality)
 	return CastResult.SUCCESS
 
 
-func expire_spell_cast(player_id: StringName, now_ms: int) -> bool:
-	return _pending_cast != null and now_ms >= _pending_cast.deadline_ms and cancel_spell_cast(player_id)
+func _match_spell_rune(guide: Array[PackedVector2Array], strokes: Array[PackedVector2Array]) -> RuneMatcher.MatchResult:
+	return RuneMatcher.recognize(guide, strokes, _spell_drawing.minimum_extent,
+		_spell_drawing.recognition_tolerance, _spell_drawing.minimum_coverage)
+
+
+func expire_spell_cast(player_id: StringName, strokes: Array[PackedVector2Array], now_ms: int) -> CastResult:
+	if _pending_cast == null or _pending_cast.deadline_ms < 0 or now_ms < _pending_cast.deadline_ms:
+		return CastResult.NO_CAST
+	return submit_spell_cast(player_id, strokes, now_ms)
 
 
 func cancel_spell_cast(player_id: StringName) -> bool:
@@ -256,7 +269,8 @@ func cancel_spell_cast(player_id: StringName) -> bool:
 	return true
 
 
-func _resolve_card(player: PlayerState, copy_id: int, target_id: StringName, power_percent := 100) -> void:
+func _resolve_card(player: PlayerState, copy_id: int, target_id: StringName, power_percent := 100,
+		cast_quality := "") -> void:
 	var card := card_data(copy_id)
 	var target := enemy_state(target_id)
 	var justice_qualifies := (player.arcana_id == MajorArcana.JUSTICE and not player.arcana_used
@@ -267,13 +281,15 @@ func _resolve_card(player: PlayerState, copy_id: int, target_id: StringName, pow
 	if _spell_drawing != null and card.rune_template != null:
 		action[&"spell_power_percent"] = power_percent
 		_log("%s cast %s at %d%% base power." % [player.id, card.rune_template.display_name, power_percent])
+	if not cast_quality.is_empty():
+		action[&"spell_quality"] = cast_quality
 	action_history.append(action)
 	player.mana -= card.mana_cost
 	player.hand.erase(copy_id)
 	_log("%s played %s for %d Mana." % [player.id, card.display_name, card.mana_cost])
-	if not card.spell_booster_stroke.is_empty():
-		player.spell_booster_stroke = card.spell_booster_stroke.duplicate()
-		_log("%s primed an extra stroke for their next drawn spell." % player.id)
+	if card.is_spell_booster:
+		player.spell_booster_primed = true
+		_log("%s primed a rune enhancement for their next drawn spell." % player.id)
 	for effect in card.effects:
 		match effect.kind:
 			CardEffect.Kind.DAMAGE:
