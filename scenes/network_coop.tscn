@@ -103,6 +103,14 @@ layout_mode = 2
 disabled = true
 text = "Portal Routes (Prototype)"
 
+[node name="BattleMagePool" type="CheckBox" parent="Layout/ConnectionMargin/Connection/Controls"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+disabled = true
+tooltip_text = "Offer an expanded Battle Mage reward pool to each Mage in this run."
+text = "Expanded Battle Mage Rewards (Prototype)"
+
 [node name="PacingControls" type="HBoxContainer" parent="Layout/ConnectionMargin/Connection/Controls"]
 unique_name_in_owner = true
 visible = false

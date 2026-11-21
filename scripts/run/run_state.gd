@@ -27,7 +27,7 @@ var selected_arcana: StringName
 
 var _data: RunData
 var _deck: Array[CardData]
-var _eligible_rewards: Array[CardData] = []
+var _offers: Array[CardData] = []
 var _reward_choices: Array[StringName] = []
 var _arcana_offers: Array[StringName] = []
 var _rng := RandomNumberGenerator.new()
@@ -41,7 +41,6 @@ func _init(data: RunData) -> void:
 	max_hp = data.player_max_hp
 	current_hp = max_hp
 	_deck = data.starting_deck.duplicate()
-	_eligible_rewards = data.eligible_rewards(PLAYER_CLASS)
 	if data.portal_enabled:
 		_portal_route = PortalRoute.new(run_seed)
 	if data.major_arcana_enabled:
@@ -71,7 +70,7 @@ func deck_cards() -> Array[CardData]:
 
 
 func reward_options() -> Array[CardData]:
-	return _eligible_rewards.duplicate() if stage == Stage.REWARD else []
+	return _offers.duplicate() if stage == Stage.REWARD else []
 
 
 ## Decisions in encounter order. An empty ID records a skip.
@@ -104,6 +103,7 @@ func finish_combat(combat: CombatState) -> bool:
 		stage = Stage.VICTORY
 	else:
 		selected_reward = null
+		_offers = _data.reward_offers(PLAYER_CLASS, encounter_id, 0)
 		stage = Stage.REWARD
 	return true
 
@@ -111,7 +111,7 @@ func finish_combat(combat: CombatState) -> bool:
 func take_reward(card_id: StringName) -> bool:
 	if stage != Stage.REWARD:
 		return false
-	for card in _eligible_rewards:
+	for card in _offers:
 		if card.id == card_id:
 			_deck.append(card)
 			_finish_reward(card)
@@ -165,6 +165,7 @@ func submit_portal(id: StringName) -> bool:
 
 func _finish_reward(card: CardData) -> void:
 	selected_reward = card
+	_offers.clear()
 	_reward_choices.append(card.id if card != null else &"")
 	if _portal_route != null:
 		stage = Stage.PORTAL

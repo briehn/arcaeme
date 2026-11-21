@@ -112,6 +112,12 @@ visible = false
 layout_mode = 2
 autowrap_mode = 3
 
+[node name="SpellDrawingFeedback" type="Label" parent="MarginContainer/VBoxContainer/CombatScroll/Content"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+autowrap_mode = 3
+
 [node name="HandCards" type="HFlowContainer" parent="MarginContainer/VBoxContainer/CombatScroll/Content"]
 unique_name_in_owner = true
 layout_mode = 2

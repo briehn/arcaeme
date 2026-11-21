@@ -1,5 +1,9 @@
 extends Resource
 
+enum Category { NORMAL, ELITE, BOSS }
+
+@export var category := Category.NORMAL
+
 const CardData = preload("res://scripts/combat/card_data.gd")
 const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
 const EnemyData = preload("res://scripts/combat/enemy_data.gd")

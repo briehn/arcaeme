@@ -2,6 +2,7 @@ extends SceneTree
 
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const MajorArcana = preload("res://scripts/run/major_arcana.gd")
+const BattleMagePool = preload("res://scripts/run/battle_mage_pool_playtest.gd")
 const PortalRoute = preload("res://scripts/run/portal_route.gd")
 const NetworkSession = preload("res://scripts/network/network_coop_session.gd")
 const ViewSnapshot = preload("res://scripts/combat/combat_view_snapshot.gd")
@@ -17,6 +18,9 @@ const MODIFIER_ENCOUNTER = preload("res://resources/prototype/modifier_playtest/
 const TWO_SLIMES = preload("res://resources/prototype/enemies/two_slimes.tres")
 const THREE_ENEMIES = preload("res://resources/prototype/enemies/three_enemies.tres")
 const REVERSAL = preload("res://resources/prototype/cards/arcane_reversal.tres")
+const MIRROR_LUNGE = preload("res://resources/prototype/cards/pool_expansion/mirror_lunge.tres")
+const SHATTERGUARD = preload("res://resources/prototype/cards/pool_expansion/shatterguard.tres")
+const TACTICIANS_PAGE = preload("res://resources/prototype/cards/pool_expansion/tacticians_page.tres")
 const NAMES: Array[StringName] = [&"Battle Mage 1", &"Battle Mage 2", &"Battle Mage 3", &"Battle Mage 4"]
 const VIEWPORT_SIZES := [Vector2i(960, 540), Vector2i(1024, 576), Vector2i(1280, 720), Vector2i(1920, 1080)]
 
@@ -49,6 +53,8 @@ func _run() -> void:
 		await _test_solo_run()
 		await _test_multi_enemy_run(false)
 		await _test_multi_enemy_run(true)
+		await _test_expanded_rewards(false)
+		await _test_expanded_rewards(true)
 		await _test_portal_run(false)
 		await _test_portal_run(true)
 		await _test_arcana_run(false)
@@ -84,6 +90,10 @@ func _test_menu() -> void:
 	_check(not primary.visible and tools.visible and back.has_focus(), "prototype tools open with a focused return action")
 	var portal := _control(menu, "%PortalPrototype") as CheckBox
 	_check(await _reach(portal) and not portal.button_pressed, "main menu portal routes are reachable and opt-in")
+	var battle_mage_pool := _control(menu, "%BattleMagePool") as CheckBox
+	_check(await _reach(battle_mage_pool) and not battle_mage_pool.button_pressed,
+		"main menu expanded Battle Mage rewards are reachable and opt-in")
+	_check_button_text(battle_mage_pool, "main menu expanded Battle Mage toggle")
 	for path in ["%StartRunButton", "%StartEnemyVarietyRunButton", "%StartLocalCoopButton",
 			"%StartStatusPlaytestButton", "%StartModifierPlaytestButton", "%CardExpansion",
 			"%EnemyPlaytest", "%StartEnemyPlaytestButton"]:
@@ -197,6 +207,34 @@ func _test_multi_enemy_run(local_coop: bool) -> void:
 	await _close(run)
 
 
+func _test_expanded_rewards(local_coop: bool) -> void:
+	var run := RUN.instantiate() as Control
+	run.run_data = BattleMagePool.with_expanded_rewards(MULTI_ENEMY_RUN)
+	run.local_coop = local_coop
+	_viewport.add_child(run)
+	await _settle()
+	var choices := _control(run, "%Choices")
+	if not local_coop:
+		await _act_on(choices.get_child(0) as Button, "expanded reward run opening")
+	await _finish_displayed_fight(run)
+	if local_coop:
+		await _act_on(choices.get_child(0) as Button, "expanded reward reveal")
+	_check(choices.get_child_count() == 4, "expanded run displays three choices and Skip")
+	for button: Button in choices.get_children():
+		_check(await _reach(button), "expanded reward is reachable")
+		_check_button_text(button, "expanded reward")
+	await _act_on(choices.get_child(0) as Button, "take the first expanded reward")
+	if local_coop:
+		_check(choices.get_child_count() == 1 and "Battle Mage 2" in choices.get_child(0).text,
+			"local handoff keeps the prior seat's expanded options private")
+		await _act_on(choices.get_child(0) as Button, "expand the second seat's reward")
+		await _act_on(choices.get_child(3) as Button, "skip the second seat's expanded reward")
+	else:
+		await _act_on(choices.get_child(0) as Button, "start the next fight with the expanded reward")
+	await _check_run_encounter(run, "Encounter 2 of 3", "Goblin + Treant")
+	await _close(run)
+
+
 func _check_run_encounter(run: Control, progress: String, encounter: String) -> void:
 	var combat := run.get_node("Combat") as Control
 	var title := _control(combat, "%TitleLabel") as Label
@@ -228,11 +266,13 @@ func _test_portal_run(local_coop: bool) -> void:
 	_check("Choose a Portal" in heading.text and choices.get_child_count() == 2
 		and not _control(run, "%DeckTitle").visible, "portals replace personal rewards in the post-encounter panel")
 	for choice: Button in choices.get_children():
-		_check(choice.has_meta(&"portal_id") and "Next portals:" in choice.text and " / " in choice.text
+		_check(choice.has_meta(&"portal_id") and choice.text == "Normal Encounter\nNext portals: Normal Encounter / Normal Encounter"
+			and choice.tooltip_text.is_empty()
 			and await _reach(choice), "portal choice shows a readable one-step branch")
 		_check_button_text(choice, "portal preview")
 	var chosen_portal := choices.get_child(0) as Button
-	var next_name := chosen_portal.text.get_slice("  ·  ", 0).trim_prefix("Portal to ")
+	var route := PortalRoute.new(MULTI_ENEMY_RUN.run_seed)
+	var next_name := route.destination(PortalRoute.START, StringName(chosen_portal.get_meta(&"portal_id"))).enemy_name
 	await _act_on(chosen_portal, "choose a portal")
 	if local_coop:
 		_check("1/2" in heading.text and not run.has_node("Combat"), "local portal waits for both Mages")
@@ -426,11 +466,17 @@ func _test_network() -> void:
 	_check(portal_option.visible and not portal_option.disabled and not portal_option.button_pressed,
 		"network portals are an opt-in on the multi-enemy route")
 	await _act_on(portal_option, "network Portal Routes toggle")
+	var pool_option := _control(scene, "%BattleMagePool") as CheckBox
+	_check(pool_option.visible and not pool_option.disabled and not pool_option.button_pressed,
+		"network expanded rewards are an opt-in on the multi-enemy route")
+	await _act_on(pool_option, "network expanded Battle Mage rewards")
+	_check_button_text(pool_option, "network expanded Battle Mage toggle")
 	await _act_on(variety, "network switch back to Enemy Variety")
 	_check(not multi_enemy.button_pressed and variety.button_pressed and session.run_data != MULTI_ENEMY_RUN,
 		"switching back to Enemy Variety clears the multi-enemy route")
 	_check(not arcana_option.visible and not arcana_option.button_pressed, "switching routes clears Arcana opt-in")
 	_check(not portal_option.visible and not portal_option.button_pressed, "switching routes clears portal opt-in")
+	_check(not pool_option.visible and not pool_option.button_pressed, "switching routes clears expanded rewards opt-in")
 
 	var combat := _control(scene, "%CombatSlot").get_node("Combat") as Control
 	session.party_size = 4
@@ -504,6 +550,10 @@ func _test_network() -> void:
 	for choice in _control(scene, "%RewardChoices").get_children():
 		_check(await _reach(choice), "network reward %s is reachable" % choice.text.get_slice("\n", 0))
 	_check_control(_control(scene, "%SkipReward"), "network reward after choice navigation")
+	session.snapshot.reward_options = []
+	for card in [MIRROR_LUNGE, SHATTERGUARD, TACTICIANS_PAGE]:
+		session.snapshot.reward_options.append({"id": String(card.id), "name": card.display_name,
+			"cost": card.mana_cost, "description": card.description()})
 	session.snapshot.merge({
 		"encounter_id": 2, "encounter_count": 3, "enemy_name": "Goblin + Treant",
 		"run_title": MULTI_ENEMY_RUN.title, "next_encounter_name": "Citadel Warden",
@@ -517,6 +567,9 @@ func _test_network() -> void:
 	_check_control(run_stage, "multi-enemy network reward")
 	_check_control(reward_status, "multi-enemy network reward")
 	_check_control(_control(scene, "%SkipReward"), "multi-enemy network reward")
+	for choice: Button in _control(scene, "%RewardChoices").get_children():
+		_check(await _reach(choice), "long expanded network reward is reachable")
+		_check_button_text(choice, "long expanded network reward")
 	session.snapshot.merge({
 		"run_stage": "portal", "encounter_id": 1, "encounter_count": 4, "enemy_name": "Two Slimes",
 		"portal_ready": 0, "portal_submitted": false,

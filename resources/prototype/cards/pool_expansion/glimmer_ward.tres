@@ -1,0 +1,18 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="1_card"]
+[ext_resource type="Script" path="res://scripts/combat/card_effect.gd" id="2_effect"]
+
+[sub_resource type="Resource" id="Effect_1"]
+script = ExtResource("2_effect")
+kind = 1
+amount = 2
+
+[resource]
+script = ExtResource("1_card")
+id = &"glimmer_ward"
+display_name = "Glimmer Ward"
+mana_cost = 0
+approval_status = "Provisional"
+owner_class_id = &"battle_mage"
+effects = Array[ExtResource("2_effect")]([SubResource("Effect_1")])

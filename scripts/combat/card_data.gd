@@ -1,6 +1,7 @@
 extends Resource
 
 const CardEffect = preload("res://scripts/combat/card_effect.gd")
+const RuneTemplate = preload("res://scripts/combat/rune_template.gd")
 
 @export var id: StringName
 @export var display_name: String
@@ -12,6 +13,10 @@ const CardEffect = preload("res://scripts/combat/card_effect.gd")
 @export var effects: Array[CardEffect] = []
 ## Optional display wording. Combat always resolves the ordered effects above.
 @export var description_override: String
+## Prototype assignments. Unassigned regular cards retain their instant path for this playtest.
+@export var rune_template: RuneTemplate
+## A nonempty stroke marks an instant prototype Booster.
+@export var spell_booster_stroke := PackedVector2Array()
 
 
 func description() -> String:

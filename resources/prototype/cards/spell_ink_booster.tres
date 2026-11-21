@@ -1,0 +1,11 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="1_card"]
+
+[resource]
+script = ExtResource("1_card")
+id = &"spell_ink_booster"
+display_name = "Spell Ink Booster"
+mana_cost = 1
+description_override = "Instant Booster. Add a stroke to your next rune and increase its base power on success. Does not stack."
+spell_booster_stroke = PackedVector2Array(0.72, 0.85, 0.90, 0.85)

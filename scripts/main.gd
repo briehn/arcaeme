@@ -5,16 +5,21 @@ const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 const EnemyPlaytestSelector = preload("res://scripts/ui/enemy_playtest_selector.gd")
 const CardExpansionPlaytest = preload("res://scripts/run/card_expansion_playtest.gd")
+const BattleMagePoolPlaytest = preload("res://scripts/run/battle_mage_pool_playtest.gd")
 const PrototypeRunView = preload("res://scripts/prototype_run.gd")
 const PROTOTYPE_RUN_SCENE = preload("res://scenes/prototype_run.tscn")
 const ENEMY_VARIETY_RUN_SCENE = preload("res://scenes/enemy_variety_run.tscn")
 const MULTI_ENEMY_RUN = preload("res://resources/prototype/multi_enemy_run.tres")
 const LOCAL_COOP_SCENE = preload("res://scenes/local_coop.tscn")
+const SPELL_DRAWING = preload("res://resources/prototype/spell_drawing_settings.tres")
 
 @onready var enemy_playtest: EnemyPlaytestSelector = %EnemyPlaytest
 @onready var card_expansion: CheckBox = %CardExpansion
 @onready var major_arcana: CheckBox = %MajorArcana
 @onready var portal_prototype: CheckBox = %PortalPrototype
+@onready var battle_mage_pool: CheckBox = %BattleMagePool
+@onready var spell_drawing: CheckBox = %SpellDrawing
+@onready var spell_drawing_bypass: CheckBox = %SpellDrawingBypass
 
 var _enemy_local_coop_button: Button
 
@@ -25,9 +30,17 @@ func _ready() -> void:
 	_fit_logo_area()
 	var unchecked := _checkbox_marker(false)
 	var checked := _checkbox_marker(true)
-	for toggle: CheckBox in [major_arcana, portal_prototype, card_expansion]:
+	for toggle: CheckBox in [major_arcana, portal_prototype, battle_mage_pool, card_expansion,
+			spell_drawing, spell_drawing_bypass]:
 		toggle.add_theme_icon_override(&"unchecked", unchecked)
 		toggle.add_theme_icon_override(&"checked", checked)
+	spell_drawing.toggled.connect(_set_drawing_bypass_available)
+
+
+func _set_drawing_bypass_available(enabled: bool) -> void:
+	spell_drawing_bypass.disabled = not enabled
+	if not enabled:
+		spell_drawing_bypass.set_pressed_no_signal(false)
 
 
 func _fit_logo_area() -> void:
@@ -60,7 +73,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 
 func _on_button_pressed() -> void:
-	get_tree().change_scene_to_file("res://scenes/combat.tscn")
+	_launch_combat(COMBAT_SCENE.instantiate())
 
 
 func _on_start_run_pressed() -> void:
@@ -81,6 +94,8 @@ func _start_multi_enemy_run(local_coop: bool) -> void:
 		run.run_data = MULTI_ENEMY_RUN.duplicate()
 		run.run_data.major_arcana_enabled = major_arcana.button_pressed
 		run.run_data.portal_enabled = portal_prototype.button_pressed
+	if battle_mage_pool.button_pressed:
+		run.run_data = BattleMagePoolPlaytest.with_expanded_rewards(run.run_data)
 	run.local_coop = local_coop
 	get_tree().change_scene_to_node(run)
 
@@ -95,7 +110,7 @@ func _start_local_coop(encounter: EncounterData = null) -> void:
 		combat.encounter = encounter
 	if card_expansion.button_pressed:
 		combat.encounter = CardExpansionPlaytest.with_expansion_deck(combat.encounter)
-	get_tree().change_scene_to_node(combat)
+	_launch_combat(combat)
 
 
 func _on_start_network_coop_pressed() -> void:
@@ -115,6 +130,16 @@ func _on_start_enemy_playtest_pressed() -> void:
 	combat.encounter = enemy_playtest.selected_encounter()
 	if card_expansion.button_pressed:
 		combat.encounter = CardExpansionPlaytest.with_expansion_deck(combat.encounter)
+	_launch_combat(combat)
+
+
+func _launch_combat(combat: CombatView) -> void:
+	if spell_drawing.button_pressed:
+		var fixture: EncounterData = combat.encounter.duplicate()
+		fixture.test_deck = SPELL_DRAWING.test_deck.duplicate()
+		combat.encounter = fixture
+		combat.spell_drawing = SPELL_DRAWING
+		combat.bypass_drawing = spell_drawing_bypass.button_pressed
 	get_tree().change_scene_to_node(combat)
 
 

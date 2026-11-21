@@ -5,6 +5,7 @@
 [resource]
 script = ExtResource("1_encounter")
 enemy_id = &"citadel_warden"
+category = 2
 enemy_name = "Citadel Warden"
 enemy_max_hp = 38
 enemy_attack = 10

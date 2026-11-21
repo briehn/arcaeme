@@ -176,11 +176,11 @@ func _on_peer_connected(peer_id: int) -> void:
 	if _assignments.size() == party_size:
 		_transport.refuse_new_connections = true
 		var offer_seed: Variant = null
-		if _hosting_short_run and run_data.major_arcana_enabled:
+		if _hosting_short_run and (run_data.major_arcana_enabled or run_data.reward_offer_count > 0):
 			# Do not derive hosted offers from the public fixture's combat seed.
 			var entropy := Crypto.new().generate_random_bytes(8)
 			if entropy.size() != 8:
-				_disconnect("Could not generate private opening offers.")
+				_disconnect("Could not generate private run offers.")
 				return
 			offer_seed = entropy.decode_s64(0)
 		_authority = Authority.new(encounter, _assignments, run_data if _hosting_short_run else null, offer_seed)

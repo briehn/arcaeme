@@ -26,8 +26,9 @@ func _initialize() -> void:
 	quit(int(_failures > 0))
 
 
-func _run_sample(roster: Array[StringName], seed: int, seed_index: int, policy: String) -> Dictionary:
-	var data: RunData = ROUTE.duplicate()
+func _run_sample(roster: Array[StringName], seed: int, seed_index: int, policy: String,
+		template: RunData = ROUTE) -> Dictionary:
+	var data: RunData = template.duplicate()
 	data.run_seed = seed
 	var solo: RunState
 	var party: CoopRunState
@@ -60,15 +61,13 @@ func _run_sample(roster: Array[StringName], seed: int, seed_index: int, policy: 
 			for player in roster:
 				result.final_hp[player] = combat.players[player].hp
 			break
-		var offers := data.eligible_rewards(RunData.BATTLE_MAGE)
 		for seat in roster.size():
 			var player := roster[seat]
-			var take := (seed_index + seat + encounter_id) % 2 == 0
-			var card := offers[(seed + seat + encounter_id) % offers.size()]
-			var reward_id := card.id if take else &""
+			var offers := data.reward_offers(RunData.BATTLE_MAGE, encounter_id, seat)
+			var reward_id := _draft_reward(offers, seed, seed_index, seat, encounter_id)
 			var accepted: bool
 			if solo != null:
-				accepted = solo.take_reward(reward_id) if take else solo.skip_reward()
+				accepted = solo.take_reward(reward_id) if reward_id != &"" else solo.skip_reward()
 			else:
 				accepted = party.submit_reward(player, reward_id)
 			_check(accepted, "each seat independently settles this reward")
@@ -88,6 +87,12 @@ func _run_sample(roster: Array[StringName], seed: int, seed_index: int, policy: 
 	_check((result.victory and result.final_stage == "victory" and result.encounters.size() == data.encounter_count())
 		or (not result.victory and result.final_stage == "defeat"), "run outcome agrees with the final encounter")
 	return result
+
+
+func _draft_reward(offers: Array, seed: int, seed_index: int, seat: int, encounter_id: int) -> StringName:
+	if (seed_index + seat + encounter_id) % 2 != 0:
+		return &""
+	return offers[(seed + seat + encounter_id) % offers.size()].id
 
 
 func _measure_combat(combat: CombatState, roster: Array[StringName], seed: int, policy: String,
@@ -160,6 +165,7 @@ func _measure_combat(combat: CombatState, roster: Array[StringName], seed: int, 
 		"commands": combat.action_history.size(), "enemy_attacks": attacks, "enemy_actions": enemy_actions,
 		"targeted": targeted, "targeted_with_choice": targeted_with_choice, "first_target": first_target, "players": players,
 		"zero_card_seats": zero_card_seats, "party_hp_lost": party_hp_lost,
+		"status_hp_loss": _status_hp_loss(combat.combat_log),
 		"trace": JSON.stringify([combat.action_history, combat.combat_log]).sha256_text()}
 
 

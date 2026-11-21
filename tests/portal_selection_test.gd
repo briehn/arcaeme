@@ -2,6 +2,7 @@ extends SceneTree
 
 const Authority = preload("res://scripts/network/network_combat_authority.gd")
 const CombatState = preload("res://scripts/combat/combat_state.gd")
+const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const PortalRoute = preload("res://scripts/run/portal_route.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const RunState = preload("res://scripts/run/run_state.gd")
@@ -38,27 +39,28 @@ func _test_graph() -> void:
 		paths[JSON.stringify(opening)] = true
 		var first_ids := {}
 		for portal in opening:
-			var destination := StringName(portal.destination_id)
 			var link := StringName(portal.id)
 			var encounter := graph.destination(PortalRoute.START, link)
+			var destination := encounter.enemy_id
 			_check(destination in [&"goblin_treant", &"three_enemies"] and not first_ids.has(destination)
 				and encounter != null and encounter.enemy_id == destination
-				and portal.name == encounter.enemy_name and not String(portal.type).is_empty(),
-				"opening portals uniquely point to named existing encounters")
+				and portal.type == "Normal Encounter" and portal.size() == 3
+				and String(link).length() == 64 and String(link).is_valid_hex_number(),
+				"opening portals point to existing encounters and expose only category, opaque token, and branches")
 			first_ids[destination] = true
-			_verify_stable_id(stable_ids, PortalRoute.START, portal)
+			_verify_stable_id(stable_ids, PortalRoute.START, destination, portal)
 			var next := graph.options(destination)
 			_check(next.size() == 2 and next == replay.options(destination)
 				and portal.branches == _preview_of(next), "an opening preview lists both immediate next branches")
 			var next_ids := {}
 			for branch in next:
-				var next_destination := StringName(branch.destination_id)
+				var next_destination := graph.destination(destination, StringName(branch.id)).enemy_id
 				_check(next_destination in [&"slime", &"goblin", &"treant"] and not next_ids.has(next_destination),
 					"later branches have distinct supported destinations")
 				next_ids[next_destination] = true
-				_verify_stable_id(stable_ids, destination, branch)
+				_verify_stable_id(stable_ids, destination, next_destination, branch)
 				var finals := graph.options(next_destination)
-				_check(finals.size() == 1 and finals[0].destination_id == String(PortalRoute.BOSS)
+				_check(finals.size() == 1 and finals[0].type == "Boss Encounter"
 					and finals[0].branches.is_empty() and branch.branches == _preview_of(finals),
 					"each later branch previews one terminal boss portal")
 				if finals.size() == 1:
@@ -66,10 +68,12 @@ func _test_graph() -> void:
 					_check(boss != null and boss.enemy_id == PortalRoute.BOSS and boss.enemies.size() <= 1,
 						"the only final destination is the existing single-enemy boss")
 	_check(paths.size() > 1, "different seeds vary the presented branching graph")
+	_check(PortalRoute.category_label(EncounterData.Category.ELITE) == "Elite Encounter",
+		"explicit elite metadata has an elite preview label")
 
 
-func _verify_stable_id(ids: Dictionary, source: StringName, portal: Dictionary) -> void:
-	var key := "%s:%s" % [source, portal.destination_id]
+func _verify_stable_id(ids: Dictionary, source: StringName, target: StringName, portal: Dictionary) -> void:
+	var key := "%s:%s" % [source, target]
 	_check(not String(portal.id).is_empty() and ids.get(key, portal.id) == portal.id,
 		"the same source and destination have a stable portal ID across seeds")
 	ids[key] = portal.id
@@ -78,7 +82,7 @@ func _verify_stable_id(ids: Dictionary, source: StringName, portal: Dictionary) 
 func _preview_of(options: Array[Dictionary]) -> Array[Dictionary]:
 	var preview: Array[Dictionary] = []
 	for option in options:
-		preview.append({"name": option.name, "type": option.type})
+		preview.append({"type": option.type})
 	return preview
 
 
@@ -141,7 +145,8 @@ func _test_solo() -> void:
 			and not run.start_next_encounter() and not run.submit_portal(&"invalid"),
 			"solo cannot bypass the portal gate or select an unoffered edge")
 		var pick: Dictionary = options[-1]
-		_check(run.submit_portal(StringName(pick.id)) and run.active_encounter.enemy_id == StringName(pick.destination_id)
+		var expected_id := PortalRoute.new(data.run_seed).destination(run.active_encounter.enemy_id, StringName(pick.id)).enemy_id
+		_check(run.submit_portal(StringName(pick.id)) and run.active_encounter.enemy_id == expected_id
 			and not run.submit_portal(StringName(pick.id)) and run.current_hp == 24,
 			"selecting a portal starts the selected fight once, with HP carried forward")
 	_check(run.stage == RunState.Stage.VICTORY and run.portal_options().is_empty(), "victory ends the full portal route")
@@ -182,6 +187,7 @@ func _test_authority(size: int) -> void:
 	var last_portal: Dictionary
 	for encounter_id in range(1, 5):
 		var combat := authority.snapshot_for(1)
+		var source_id := authority._run.active_encounter.enemy_id
 		var ally := authority.snapshot_for(2)
 		_check(combat.encounter_id == encounter_id and combat.arcana.id == arcana
 			and not ally.has("arcana") and combat.players == ally.players and combat.enemies == ally.enemies
@@ -239,8 +245,7 @@ func _test_authority(size: int) -> void:
 		for peer in range(size, 1, -1):
 			_send(authority, peer, Authority.Command.PORTAL, {"portal_id": String(entries[peer - 1])})
 		var chosen := replay.resolve(entries)
-		var expected: Dictionary = first if chosen == StringName(first.id) else last
-		_check(authority._run.active_encounter.enemy_id == StringName(expected.destination_id)
+		_check(authority._run.active_encounter.enemy_id == replay.destination(source_id, chosen).enemy_id
 			and authority.snapshot_for(1).encounter_id == encounter_id + 1,
 			"the host draw uses roster order with out-of-order votes, including the recovered teammate")
 	_check(authority.snapshot_for(1).run_stage == "victory" and not authority.snapshot_for(1).has("portal_options"),

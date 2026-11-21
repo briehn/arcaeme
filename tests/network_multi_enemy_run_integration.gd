@@ -1,6 +1,7 @@
 extends SceneTree
 
 const Authority = preload("res://scripts/network/network_combat_authority.gd")
+const BattleMagePool = preload("res://scripts/run/battle_mage_pool_playtest.gd")
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
 const NetworkSession = preload("res://scripts/network/network_coop_session.gd")
@@ -52,6 +53,14 @@ var _portal_options: Array = []
 var _portal_ready_seen: Dictionary[int, int] = {}
 var _portal_probes := 0
 var _probed_old_portal := false
+var _with_battle_mage_pool := false
+var _pool_catalog: Dictionary[String, Dictionary] = {}
+var _new_cards: Dictionary[String, bool] = {}
+var _private_reward_views: Dictionary[int, PackedStringArray] = {}
+var _pool_reward_probes := 0
+var _new_card_takes := 0
+var _new_card_plays := 0
+var _sent_new_card_name := ""
 
 
 func _initialize() -> void:
@@ -60,11 +69,21 @@ func _initialize() -> void:
 
 func _start() -> void:
 	var args := OS.get_cmdline_user_args()
-	if args.size() != 4 and (args.size() != 5 or args[4] not in ["MajorArcana", "Portals"]):
-		_fail("Expected UDP port, party size, seat, release path and optional MajorArcana or Portals.")
+	if args.size() != 4 and (args.size() != 5 or args[4] not in ["MajorArcana", "Portals", "BattleMagePool"]):
+		_fail("Expected UDP port, party size, seat, release path and optional MajorArcana, Portals or BattleMagePool.")
 		return
 	_with_arcana = args.size() == 5
 	_with_portals = args.size() == 5 and args[4] == "Portals"
+	_with_battle_mage_pool = args.size() == 5 and args[4] == "BattleMagePool"
+	if _with_battle_mage_pool:
+		var fixture := BattleMagePool.with_expanded_rewards(RUN)
+		for card in fixture.reward_candidates:
+			_pool_catalog[String(card.id)] = {
+				"id": String(card.id), "name": card.display_name, "cost": card.mana_cost,
+				"description": card.description(),
+			}
+		for card in BattleMagePool.NEW_CARDS:
+			_new_cards[String(card.id)] = true
 	if _with_portals:
 		_encounter_count = 4
 		_portal_route = PortalRoute.new(RUN.run_seed)
@@ -106,6 +125,12 @@ func _start() -> void:
 				_fail("The portal prototype must be selectable and opt-in.")
 				return
 			portals.button_pressed = true
+		if _with_battle_mage_pool:
+			var pool: CheckBox = current_scene.get_node("%BattleMagePool")
+			if pool.button_pressed or pool.disabled or not pool.is_visible_in_tree():
+				_fail("The expanded Battle Mage pool must be selectable and opt-in.")
+				return
+			pool.button_pressed = true
 		if (current_scene.get_node("%HostButton") as Button).text != "Host Multi-Enemy Short Run":
 			_fail("The lobby did not identify the selected run.")
 			return
@@ -285,8 +310,22 @@ func _verify_reward(view: Dictionary, living: int) -> bool:
 	if view.reward_submitted:
 		return view.reward_options.is_empty()
 	var reward_ids := PackedStringArray()
-	for card in view.reward_options:
+	for index in view.reward_options.size():
+		var card: Dictionary = view.reward_options[index]
+		if _with_battle_mage_pool:
+			var button: Button = choices.get_child(index)
+			if (card.id in reward_ids or card != _pool_catalog.get(card.id)
+					or card.name not in button.text or card.description not in button.text):
+				return false
 		reward_ids.append(card.id)
+	if _with_battle_mage_pool:
+		if _private_reward_views.has(encounter):
+			return reward_ids == _private_reward_views[encounter]
+		_private_reward_views[encounter] = reward_ids
+		var sorted_ids := reward_ids.duplicate()
+		sorted_ids.sort()
+		print("REWARD_VIEW %d %s" % [encounter, "\n".join(sorted_ids).sha256_text()])
+		return reward_ids.size() == 3
 	return reward_ids == PackedStringArray(REWARDS)
 
 
@@ -312,10 +351,12 @@ func _verify_portal(view: Dictionary, living: int) -> bool:
 	for index in view.portal_options.size():
 		var portal: Dictionary = view.portal_options[index]
 		var button: Button = choices.get_child(index)
-		if button.get_meta("portal_id", "") != portal.id or portal.name not in button.text:
+		if (button.get_meta("portal_id", "") != portal.id or portal.type not in button.text
+				or not button.tooltip_text.is_empty() or portal.size() != 3
+				or not String(portal.id).is_valid_hex_number()):
 			return false
 		for branch in portal.branches:
-			if branch.name not in button.text:
+			if branch.size() != 1 or branch.type not in button.text:
 				return false
 	return true
 
@@ -329,7 +370,7 @@ func _check_portal_arrival() -> bool:
 	var chosen := _portal_route.resolve(entries)
 	for option in _portal_options:
 		if StringName(option.id) == chosen:
-			_portal_source = StringName(option.destination_id)
+			_portal_source = _portal_route.destination(_portal_source, chosen).enemy_id
 			_portal_options = []
 			return true
 	return false
@@ -373,6 +414,11 @@ func _drive() -> void:
 	if not first_round:
 		var attack := _find_attack(view)
 		var target := _choose_target(view)
+		if _with_battle_mage_pool:
+			for card in view.hand:
+				if card.playable and _new_cards.has(card.id):
+					_play(view, card.copy, target if card.targets_enemy else "")
+					return
 		var player: Dictionary = view.players[_seat - 1]
 		var incoming := 0
 		for enemy in view.enemies:
@@ -415,7 +461,10 @@ func _drive_reward(view: Dictionary) -> void:
 	if _seat == 2 and view.encounter_id == 2 and not _probed_old_reward:
 		_probed_old_reward = true
 		_probe(view, Authority.Result.STALE_TURN, Authority.Command.REWARD,
-			{"encounter_id": 1, "reward_id": "shieldstrike"})
+			{"encounter_id": 1, "reward_id": view.reward_options[0].id})
+		return
+	if _with_battle_mage_pool:
+		_drive_expanded_reward(view)
 		return
 	if view.encounter_id == _seat:
 		var option := _seat - 1
@@ -424,6 +473,31 @@ func _drive_reward(view: Dictionary) -> void:
 		(choices.get_child(option) as Button).pressed.emit()
 	else:
 		(current_scene.get_node("%SkipReward") as Button).pressed.emit()
+
+
+func _drive_expanded_reward(view: Dictionary) -> void:
+	if _seat == 2 and view.encounter_id == 1 and _pool_reward_probes < 2:
+		_pool_reward_probes += 1
+		if _pool_reward_probes == 1:
+			_probe(view, Authority.Result.WRONG_PLAYER, Authority.Command.REWARD,
+				{"actor": "Battle Mage 1", "reward_id": view.reward_options[0].id})
+		else:
+			for id in _pool_catalog:
+				if id not in _private_reward_views[view.encounter_id]:
+					_probe(view, Authority.Result.ILLEGAL_ACTION, Authority.Command.REWARD, {"reward_id": id})
+					return
+		return
+	if _seat == _size and view.encounter_id == 2:
+		(current_scene.get_node("%SkipReward") as Button).pressed.emit()
+		return
+	var option := 0
+	for index in view.reward_options.size():
+		if _new_cards.has(view.reward_options[index].id):
+			option = index
+			_new_card_takes += 1
+			break
+	_deck.append(view.reward_options[option].id)
+	(current_scene.get_node("%RewardChoices").get_child(option) as Button).pressed.emit()
 
 
 func _drive_portal(view: Dictionary) -> void:
@@ -503,6 +577,9 @@ func _play(view: Dictionary, copy_id: int, target := "") -> void:
 		live_count += int(enemy.alive)
 	_sent_before = view
 	_sent_target = target
+	var card: Dictionary = view.hand[position]
+	if _with_battle_mage_pool and _new_cards.has(card.id):
+		_sent_new_card_name = card.name
 	button.pressed.emit()
 	if target.is_empty() or live_count <= 1:
 		return
@@ -542,14 +619,21 @@ func _on_result(_sequence: int, result: int) -> void:
 	if result != Authority.Result.ACCEPTED:
 		_fail("The host rejected a legal run action.")
 		return
+	if not _sent_new_card_name.is_empty():
+		var play_event := "%s played %s for " % [_actor, _sent_new_card_name]
+		if not "\n".join(_session.snapshot.log).contains(play_event):
+			_fail("The public log did not confirm the new Battle Mage card play.")
+		_sent_new_card_name = ""
+		_new_card_plays += 1
 	if not _sent_target.is_empty():
 		var after := _session.snapshot
 		for index in after.enemies.size():
 			var previous: Dictionary = _sent_before.enemies[index]
 			var enemy: Dictionary = after.enemies[index]
 			if enemy.id == _sent_target:
-				if enemy.hp + enemy.block >= previous.hp + previous.block:
-					_fail("The intended enemy did not take the targeted hit.")
+				if (enemy.hp + enemy.block >= previous.hp + previous.block
+						and enemy.burning <= previous.burning and enemy.poison <= previous.poison):
+					_fail("The intended enemy did not receive the targeted effect.")
 			elif enemy != previous:
 				_fail("A different enemy changed during a single-target play.")
 	_sent_target = ""
@@ -574,6 +658,10 @@ func _report(view: Dictionary) -> void:
 			or (_seat == 2 and (_portal_probes != 2 or not _probed_old_portal))):
 		_fail("The run ended without all portal gates or authority checks.")
 		return
+	if _with_battle_mage_pool and (_private_reward_views.size() != rewards.size()
+			or (_seat == 2 and _pool_reward_probes != 2)):
+		_fail("The run ended without exercising the expanded private rewards and authority checks.")
+		return
 	if (view.run_stage != "victory" or "Run Victory" not in stage_label.text
 			or _started != stages or _rewards_seen != rewards
 			or _partial_seen != [1, 2] or (_seat == 2 and (not _probed_target or not _probed_old_reward))
@@ -582,6 +670,8 @@ func _report(view: Dictionary) -> void:
 		_fail("The run ended without exercising every required encounter, reward, and result.")
 		return
 	_finished = true
+	if _with_battle_mage_pool:
+		print("EXPANDED_CARDS %d %d" % [_new_card_takes, _new_card_plays])
 	var label := "Portal Short Run Victory" if _with_portals else "Multi-Enemy Short Run Victory"
 	print("RESULT %s · %d public revisions · %s" %
 		[label, _public_digests.size(), "\n".join(_public_digests).sha256_text()])

@@ -1,0 +1,27 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="1_card"]
+[ext_resource type="Script" path="res://scripts/combat/card_effect.gd" id="2_effect"]
+
+[sub_resource type="Resource" id="Effect_1"]
+script = ExtResource("2_effect")
+amount = 5
+block_to_spend = 4
+damage_on_block_spend = 4
+
+[sub_resource type="Resource" id="Effect_2"]
+script = ExtResource("2_effect")
+amount = 5
+block_to_spend = 4
+damage_on_block_spend = 4
+
+[resource]
+script = ExtResource("1_card")
+id = &"shatterguard"
+display_name = "Shatterguard"
+mana_cost = 2
+approval_status = "Provisional"
+is_attack = true
+owner_class_id = &"battle_mage"
+effects = Array[ExtResource("2_effect")]([SubResource("Effect_1"), SubResource("Effect_2")])
+description_override = "Deal 5 damage twice. For each hit, if you have at least 4 Block, lose 4 Block to deal 4 additional damage."

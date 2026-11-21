@@ -5,6 +5,7 @@ const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
 const NetworkSession = preload("res://scripts/network/network_coop_session.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
 const CardExpansionPlaytest = preload("res://scripts/run/card_expansion_playtest.gd")
+const BattleMagePoolPlaytest = preload("res://scripts/run/battle_mage_pool_playtest.gd")
 const EnemyPlaytestSelector = preload("res://scripts/ui/enemy_playtest_selector.gd")
 const PacingExperiment = preload("res://scripts/run/pacing_experiment.gd")
 const PacingVariantPicker = preload("res://scripts/ui/pacing_variant_picker.gd")
@@ -24,6 +25,7 @@ const MULTI_ENEMY_RUN = preload("res://resources/prototype/multi_enemy_run.tres"
 @onready var multi_enemy_run_field: CheckBox = %MultiEnemyRun
 @onready var major_arcana_field: CheckBox = %MajorArcana
 @onready var portal_prototype_field: CheckBox = %PortalPrototype
+@onready var battle_mage_pool_field: CheckBox = %BattleMagePool
 @onready var pacing_controls: HBoxContainer = %PacingControls
 @onready var pacing_variant_field: PacingVariantPicker = %PacingVariant
 @onready var status_playtest_field: CheckBox = %StatusPlaytest
@@ -85,6 +87,7 @@ func _refresh() -> void:
 	multi_enemy_run_field.disabled = connected_or_waiting or not short_run_field.button_pressed
 	major_arcana_field.disabled = connected_or_waiting or not major_arcana_field.visible
 	portal_prototype_field.disabled = connected_or_waiting or not portal_prototype_field.visible
+	battle_mage_pool_field.disabled = connected_or_waiting or not battle_mage_pool_field.visible
 	pacing_variant_field.disabled = connected_or_waiting or not enemy_variety_run_field.button_pressed
 	status_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
 	modifier_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
@@ -279,13 +282,12 @@ func _on_multi_enemy_run_toggled(enabled: bool) -> void:
 
 func _refresh_run_variant() -> void:
 	var variety := enemy_variety_run_field.button_pressed
-	major_arcana_field.visible = short_run_field.button_pressed and multi_enemy_run_field.button_pressed
-	major_arcana_field.disabled = not major_arcana_field.visible
-	portal_prototype_field.visible = major_arcana_field.visible
-	portal_prototype_field.disabled = not portal_prototype_field.visible
-	if not major_arcana_field.visible:
-		major_arcana_field.set_pressed_no_signal(false)
-		portal_prototype_field.set_pressed_no_signal(false)
+	var multi_enemy := short_run_field.button_pressed and multi_enemy_run_field.button_pressed
+	for option in [major_arcana_field, portal_prototype_field, battle_mage_pool_field]:
+		option.visible = multi_enemy
+		option.disabled = not multi_enemy
+		if not multi_enemy:
+			option.set_pressed_no_signal(false)
 	if variety:
 		session.run_data = ENEMY_VARIETY_RUN
 	elif multi_enemy_run_field.button_pressed:
@@ -373,6 +375,8 @@ func _on_host_pressed() -> void:
 			session.run_data = MULTI_ENEMY_RUN.duplicate()
 			session.run_data.major_arcana_enabled = major_arcana_field.button_pressed
 			session.run_data.portal_enabled = portal_prototype_field.button_pressed
+		if battle_mage_pool_field.button_pressed:
+			session.run_data = BattleMagePoolPlaytest.with_expanded_rewards(session.run_data)
 	session.host(int(port_field.value), party_size, short_run_field.button_pressed)
 
 

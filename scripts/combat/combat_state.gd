@@ -7,8 +7,11 @@ const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
 const EnemyData = preload("res://scripts/combat/enemy_data.gd")
 const EnemyState = preload("res://scripts/combat/enemy_state.gd")
 const MajorArcana = preload("res://scripts/run/major_arcana.gd")
+const RuneMatcher = preload("res://scripts/combat/rune_matcher.gd")
+const SpellDrawingSettings = preload("res://scripts/combat/spell_drawing_settings.gd")
 
 enum Phase { PLAYER, ENEMY, VICTORY, DEFEAT }
+enum CastResult { NO_CAST, SUCCESS, INCOMPLETE, MISDRAWN, EXPIRED, INVALID }
 
 const TURN_MANA := 3
 const TURN_DRAW := 5
@@ -34,10 +37,20 @@ class PlayerState:
 	var arcana_saw_attack: bool
 	var arcana_saw_non_attack: bool
 	var recovered_after_victory: bool
+	var spell_booster_stroke := PackedVector2Array()
 	var first_copy_id: int
 	var hand: Array[int] = []
 	var draw_pile: Array[int] = []
 	var discard_pile: Array[int] = []
+
+
+class PendingCast:
+	var player_id: StringName
+	var copy_id: int
+	var target_id: StringName
+	var deadline_ms: int
+	var guide: Array[PackedVector2Array]
+	var boosted: bool
 
 
 var phase: Phase = Phase.PLAYER
@@ -70,12 +83,18 @@ var combat_log: PackedStringArray = []
 var _enemies_by_id: Dictionary[StringName, EnemyState] = {}
 var _cards: Array[CardData] = []
 var _rng := RandomNumberGenerator.new()
+var _spell_drawing: SpellDrawingSettings
+var _bypass_drawing := false
+var _pending_cast: PendingCast
 
 
 func _init(encounter: EncounterData, encounter_seed: int, player_ids: Array[StringName], starting_hp := -1,
 		player_decks: Dictionary[StringName, Array] = {}, player_hps: Dictionary[StringName, int] = {},
-		arcana_by_player: Dictionary[StringName, StringName] = {}) -> void:
+		arcana_by_player: Dictionary[StringName, StringName] = {}, spell_drawing: SpellDrawingSettings = null,
+		bypass_drawing := false) -> void:
 	assert(not player_ids.is_empty(), "Combat requires at least one player.")
+	_spell_drawing = spell_drawing
+	_bypass_drawing = bypass_drawing
 	shuffle_seed = encounter_seed
 	_rng.seed = shuffle_seed
 	var definitions := encounter.enemies
@@ -145,10 +164,12 @@ func enemy_attack_damage() -> int:
 
 func can_play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bool:
 	var player: PlayerState = players.get(player_id)
-	if not _can_act(player) or not player.hand.has(copy_id):
+	if _pending_cast != null or not _can_act(player) or not player.hand.has(copy_id):
 		return false
 	var card := card_data(copy_id)
 	if player.mana < card.mana_cost:
+		return false
+	if not card.spell_booster_stroke.is_empty() and (_spell_drawing == null or not player.spell_booster_stroke.is_empty()):
 		return false
 	if not card.targets_enemy():
 		return target_id == &""
@@ -157,29 +178,111 @@ func can_play_card(player_id: StringName, copy_id: int, target_id: StringName) -
 
 
 func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bool:
-	if not can_play_card(player_id, copy_id, target_id):
+	if not can_play_card(player_id, copy_id, target_id) or requires_rune(copy_id):
 		return false
 	var player := players[player_id]
+	var card := card_data(copy_id)
+	if _spell_drawing != null and card.rune_template != null:
+		var boosted := not player.spell_booster_stroke.is_empty()
+		var power := 100 + (_spell_drawing.booster_bonus_percent if boosted else 0)
+		player.spell_booster_stroke = PackedVector2Array()
+		_resolve_card(player, copy_id, target_id, power)
+	else:
+		_resolve_card(player, copy_id, target_id)
+	return true
+
+
+func requires_rune(copy_id: int) -> bool:
+	return (_spell_drawing != null and not _bypass_drawing and copy_id >= 0 and copy_id < _cards.size()
+		and card_data(copy_id).rune_template != null)
+
+
+func begin_spell_cast(player_id: StringName, copy_id: int, target_id: StringName, now_ms: int) -> Dictionary:
+	if not can_play_card(player_id, copy_id, target_id) or not requires_rune(copy_id):
+		return {}
+	var card := card_data(copy_id)
+	var template := card.rune_template
+	var cast := PendingCast.new()
+	cast.player_id = player_id
+	cast.copy_id = copy_id
+	cast.target_id = target_id
+	cast.deadline_ms = now_ms + template.cast_time_ms
+	cast.guide = template.strokes.duplicate()
+	var booster := players[player_id].spell_booster_stroke
+	cast.boosted = not booster.is_empty()
+	if cast.boosted:
+		cast.guide.append(booster)
+	_pending_cast = cast
+	var display_guide: Array[PackedVector2Array] = []
+	for stroke in cast.guide:
+		display_guide.append(stroke.duplicate())
+	return {"card_name": card.display_name, "rune_name": template.display_name,
+		"guide": display_guide, "deadline_ms": cast.deadline_ms, "boosted": cast.boosted}
+
+
+func submit_spell_cast(player_id: StringName, strokes: Array[PackedVector2Array], now_ms: int) -> CastResult:
+	if _pending_cast == null or _pending_cast.player_id != player_id:
+		return CastResult.NO_CAST
+	var cast := _pending_cast
+	_pending_cast = null
+	if now_ms >= cast.deadline_ms:
+		return CastResult.EXPIRED
+	if not can_play_card(player_id, cast.copy_id, cast.target_id):
+		return CastResult.INVALID
+	if strokes.size() < cast.guide.size():
+		return CastResult.INCOMPLETE
+	for stroke in strokes:
+		if stroke.size() < 2:
+			return CastResult.INCOMPLETE
+	var score := RuneMatcher.recognize(cast.guide, strokes, _spell_drawing.minimum_extent,
+		_spell_drawing.recognition_tolerance)
+	if score <= 0.0:
+		return CastResult.MISDRAWN
+	var player := players[player_id]
+	if cast.boosted:
+		player.spell_booster_stroke = PackedVector2Array()
+	_resolve_card(player, cast.copy_id, cast.target_id, _spell_drawing.power_percent(score, cast.boosted))
+	return CastResult.SUCCESS
+
+
+func expire_spell_cast(player_id: StringName, now_ms: int) -> bool:
+	return _pending_cast != null and now_ms >= _pending_cast.deadline_ms and cancel_spell_cast(player_id)
+
+
+func cancel_spell_cast(player_id: StringName) -> bool:
+	if _pending_cast == null or _pending_cast.player_id != player_id:
+		return false
+	_pending_cast = null
+	return true
+
+
+func _resolve_card(player: PlayerState, copy_id: int, target_id: StringName, power_percent := 100) -> void:
 	var card := card_data(copy_id)
 	var target := enemy_state(target_id)
 	var justice_qualifies := (player.arcana_id == MajorArcana.JUSTICE and not player.arcana_used
 		and card.is_attack and player.block >= MajorArcana.JUSTICE_THRESHOLD)
 	var tower_available := player.arcana_id == MajorArcana.TOWER and not player.arcana_used and card.is_attack
 	var tower_triggered := false
-	action_history.append({&"command": &"play_card", &"player": player_id,
-		&"copy": copy_id, &"target": target_id})
+	var action := {&"command": &"play_card", &"player": player.id, &"copy": copy_id, &"target": target_id}
+	if _spell_drawing != null and card.rune_template != null:
+		action[&"spell_power_percent"] = power_percent
+		_log("%s cast %s at %d%% base power." % [player.id, card.rune_template.display_name, power_percent])
+	action_history.append(action)
 	player.mana -= card.mana_cost
 	player.hand.erase(copy_id)
 	_log("%s played %s for %d Mana." % [player.id, card.display_name, card.mana_cost])
+	if not card.spell_booster_stroke.is_empty():
+		player.spell_booster_stroke = card.spell_booster_stroke.duplicate()
+		_log("%s primed an extra stroke for their next drawn spell." % player.id)
 	for effect in card.effects:
 		match effect.kind:
 			CardEffect.Kind.DAMAGE:
 				var tower_bonus := MajorArcana.TOWER_DAMAGE if tower_available and not tower_triggered else 0
 				tower_triggered = tower_triggered or tower_bonus > 0
-				_deal_card_damage(player, target, card, effect, tower_bonus)
+				_deal_card_damage(player, target, card, effect, tower_bonus, power_percent)
 			CardEffect.Kind.GAIN_BLOCK:
-				var block_gain := effect.amount
-				if block_gain > 0:
+				var block_gain := _spell_base_amount(effect.amount, power_percent)
+				if effect.amount > 0:
 					block_gain += player.dexterity
 				player.block += block_gain
 				_log("%s gained %d Block." % [player.id, block_gain])
@@ -203,16 +306,15 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 	_resolve_arcana_after_card(player, card, justice_qualifies, tower_triggered)
 	player.discard_pile.append(copy_id)
 	_finish_if_enemies_down()
-	return true
 
 
 func can_end_turn(player_id: StringName) -> bool:
-	return _can_act(players.get(player_id))
+	return _pending_cast == null and _can_act(players.get(player_id))
 
 
 func end_turn(player_id: StringName) -> bool:
 	var player: PlayerState = players.get(player_id)
-	if not _can_act(player):
+	if not can_end_turn(player_id):
 		return false
 	action_history.append({&"command": &"end_turn", &"player": player_id})
 	player.ended_turn = true
@@ -226,7 +328,7 @@ func end_turn(player_id: StringName) -> bool:
 
 func can_undo_ready(player_id: StringName) -> bool:
 	var player: PlayerState = players.get(player_id)
-	return (phase == Phase.PLAYER and player != null and player.hp > 0 and player.ended_turn
+	return (_pending_cast == null and phase == Phase.PLAYER and player != null and player.hp > 0 and player.ended_turn
 		and _has_unready_living_players())
 
 
@@ -303,8 +405,8 @@ func _resolve_arcana_after_card(player: PlayerState, card: CardData, justice_qua
 
 
 func _deal_card_damage(player: PlayerState, enemy: EnemyState, card: CardData, effect: CardEffect,
-		arcana_bonus: int) -> void:
-	var damage := effect.amount
+		arcana_bonus: int, power_percent: int) -> void:
+	var damage := _spell_base_amount(effect.amount, power_percent)
 	if effect.block_per_bonus > 0:
 		@warning_ignore("integer_division")
 		var block_bonus := player.block / effect.block_per_bonus
@@ -338,6 +440,10 @@ func _deal_card_damage(player: PlayerState, enemy: EnemyState, card: CardData, e
 	_log("%s took %d damage." % [enemy_label, hp_lost])
 	if hp_lost > 0 and not enemy.is_alive():
 		_log_enemy_defeat(enemy_label)
+
+
+func _spell_base_amount(amount: int, power_percent: int) -> int:
+	return amount if power_percent == 100 else roundi(amount * (power_percent / 100.0))
 
 
 func _apply_card_status(enemy: EnemyState, effect: CardEffect) -> void:

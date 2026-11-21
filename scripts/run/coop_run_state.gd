@@ -31,7 +31,8 @@ var _arcana_choices: Dictionary[StringName, StringName] = {}
 var _portal_choices: Dictionary[StringName, StringName] = {}
 var _portal_route: PortalRoute
 var _reward_ready := 0
-var _offers: Array[CardData]
+var _offers: Dictionary[StringName, Array] = {}
+var _offer_seed: Variant
 var _rng := RandomNumberGenerator.new()
 
 
@@ -39,7 +40,7 @@ func _init(data: RunData, player_ids: Array[StringName], offer_seed: Variant = n
 	_data = data
 	_player_ids = player_ids.duplicate()
 	_rng.seed = data.run_seed
-	_offers = data.eligible_rewards(RunData.BATTLE_MAGE)
+	_offer_seed = offer_seed
 	if data.portal_enabled:
 		_portal_route = PortalRoute.new(data.run_seed)
 	for player_id in _player_ids:
@@ -83,9 +84,11 @@ func observe_combat_result() -> void:
 			if stage == BOSS:
 				stage = VICTORY
 			else:
-				for player_id in _player_ids:
+				for seat in _player_ids.size():
+					var player_id := _player_ids[seat]
 					# The shared resolver has already applied post-victory recovery.
 					_current_hps[player_id] = active_combat.players[player_id].hp
+					_offers[player_id] = _data.reward_offers(RunData.BATTLE_MAGE, encounter_id, seat, _offer_seed)
 				stage = REWARD
 
 
@@ -111,7 +114,7 @@ func submit_reward(player_id: StringName, card_id: StringName) -> bool:
 		return false
 	if card_id != &"":
 		var reward: CardData
-		for card in _offers:
+		for card: CardData in _offers[player_id]:
 			if card.id == card_id:
 				reward = card
 				break
@@ -121,6 +124,7 @@ func submit_reward(player_id: StringName, card_id: StringName) -> bool:
 	_reward_choices[player_id].append(card_id)
 	_reward_ready += 1
 	if _reward_ready == _player_ids.size():
+		_offers.clear()
 		if _portal_route != null:
 			stage = PORTAL
 		else:
@@ -167,7 +171,7 @@ func view_fields(player_id: StringName) -> Dictionary:
 		var submitted := _reward_choices[player_id].size() == encounter_id
 		var options: Array[Dictionary] = []
 		if not submitted:
-			for card in _offers:
+			for card: CardData in _offers[player_id]:
 				options.append({"id": String(card.id), "name": card.display_name, "cost": card.mana_cost,
 					"description": card.description()})
 		var next := _data.encounter_after(encounter_id)

@@ -5,6 +5,9 @@ const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
 const ViewSnapshot = preload("res://scripts/combat/combat_view_snapshot.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
+const SpellDrawingSettings = preload("res://scripts/combat/spell_drawing_settings.gd")
+const SpellDrawingPanel = preload("res://scripts/ui/spell_drawing_panel.gd")
+const SPELL_DRAWING_PANEL = preload("res://scenes/spell_drawing_panel.tscn")
 const PLAYER_ID := &"Battle Mage"
 const TARGET_HIGHLIGHT := Color(0.98, 0.84, 0.56)
 
@@ -15,6 +18,8 @@ signal network_undo_ready_requested
 
 @export var encounter: EncounterData
 @export var player_ids: Array[StringName] = [PLAYER_ID]
+var spell_drawing: SpellDrawingSettings
+var bypass_drawing := false
 
 @onready var turn_label: Label = %TurnLabel
 @onready var player_label: Label = %PlayerLabel
@@ -29,6 +34,7 @@ signal network_undo_ready_requested
 @onready var combat_log: RichTextLabel = %CombatLog
 @onready var end_turn_button: Button = %EndTurnButton
 @onready var cancel_target_button: Button = %CancelTargetButton
+@onready var spell_feedback: Label = %SpellDrawingFeedback
 
 var _state: CombatState
 var _selected_player_id: StringName
@@ -42,6 +48,8 @@ var _input_allowed := false
 var _pending_card_copy := -1
 var _living_enemy_ids: Array[StringName] = []
 var _enemy_buttons: Dictionary[StringName, WrappedTextButton] = {}
+var _spell_panel: SpellDrawingPanel
+var _casting_copy := -1
 
 
 func configure_run(combat: CombatState, run_encounter: EncounterData, title: String) -> void:
@@ -85,8 +93,11 @@ func _ready() -> void:
 		%BackButton.hide()
 		return
 	if _state == null:
-		_state = CombatState.new(encounter, encounter.shuffle_seed, player_ids)
+		_state = CombatState.new(encounter, encounter.shuffle_seed, player_ids, -1, {}, {}, {},
+			spell_drawing, bypass_drawing)
 	_selected_player_id = _state.players.keys()[0]
+	if spell_drawing != null:
+		_setup_spell_drawing()
 	if not _run_title.is_empty():
 		%TitleLabel.text = _run_title
 	elif _state.players.size() > 1:
@@ -306,8 +317,12 @@ func _setup_player_selector() -> void:
 
 
 func _on_player_selected(player_id: StringName) -> void:
+	if _casting_copy >= 0:
+		return
 	if player_id != _selected_player_id:
 		_selected_player_id = player_id
+		if spell_drawing != null:
+			spell_feedback.text = _spell_drawing_hint()
 		_render()
 
 
@@ -333,6 +348,13 @@ func _render_hand(hand: Array, input_allowed: bool) -> void:
 			button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			button.text = "%s\n%d Mana\n\n%s" % [card.name, card.cost, card.description]
 			button.tooltip_text = "%s %s" % [card.approval, "Attack" if card.attack else "card"]
+			if not _network_mode and spell_drawing != null:
+				var definition := _state.card_data(copy_id)
+				var rune := definition.rune_template
+				if rune != null and not bypass_drawing:
+					button.tooltip_text += "\nRune required: " + rune.display_name
+				elif not definition.spell_booster_stroke.is_empty():
+					button.tooltip_text += "\nSuccessful cast bonus: +%d percentage points." % spell_drawing.booster_bonus_percent
 			button.pressed.connect(_on_card_pressed.bind(copy_id))
 			hand_cards.add_child(button)
 			_card_buttons[copy_id] = button
@@ -394,12 +416,84 @@ func _submit_card(copy_id: int, target: StringName) -> void:
 	if _network_mode:
 		_render_snapshot(_snapshot, _input_allowed)
 		network_card_requested.emit(copy_id, target)
-	else:
-		_state.play_card(_selected_player_id, copy_id, target)
+		return
+	if _state.requires_rune(copy_id):
+		var cast := _state.begin_spell_cast(_selected_player_id, copy_id, target, Time.get_ticks_msec())
 		_render()
+		if not cast.is_empty():
+			_casting_copy = copy_id
+			var rune_name := String(cast.rune_name) + (" · extra stroke" if cast.boosted else "")
+			_spell_panel.open_cast(cast.card_name, rune_name, cast.guide, cast.deadline_ms)
+		return
+	var played := _state.play_card(_selected_player_id, copy_id, target)
+	if played and spell_drawing != null:
+		spell_feedback.text = _spell_drawing_hint()
+	_render()
+
+
+func _setup_spell_drawing() -> void:
+	spell_feedback.show()
+	spell_feedback.text = _spell_drawing_hint()
+	if bypass_drawing:
+		return
+	_spell_panel = SPELL_DRAWING_PANEL.instantiate()
+	add_child(_spell_panel)
+	_spell_panel.drawing_submitted.connect(_on_drawing_submitted)
+	_spell_panel.cast_canceled.connect(_on_cast_canceled)
+	_spell_panel.cast_expired.connect(_on_cast_expired)
+
+
+func _spell_drawing_hint() -> String:
+	if bypass_drawing:
+		return "Spell Drawing (Prototype) · Test bypass uses full power."
+	if not _state.players[_selected_player_id].spell_booster_stroke.is_empty():
+		return "Booster ready · The next spell with a rune has an extra stroke."
+	return "Spell Drawing (Prototype) · Basic Strike, Basic Block, and Astral Salvo use runes. Other cards are instant for this test."
+
+
+func _on_drawing_submitted(strokes: Array[PackedVector2Array]) -> void:
+	var result := _state.submit_spell_cast(_selected_player_id, strokes, Time.get_ticks_msec())
+	match result:
+		CombatState.CastResult.SUCCESS:
+			var power: int = _state.action_history.back()[&"spell_power_percent"]
+			_finish_cast("Cast successful · %d%% base power." % power)
+		CombatState.CastResult.INCOMPLETE:
+			_finish_cast("Cast incomplete · Card and Mana kept.")
+		CombatState.CastResult.MISDRAWN:
+			_finish_cast("Rune didn’t match · Card and Mana kept.")
+		CombatState.CastResult.EXPIRED:
+			_finish_cast("Cast expired · Card and Mana kept.")
+		_:
+			_finish_cast("Cast no longer available · Card and Mana kept.")
+
+
+func _on_cast_canceled() -> void:
+	if _state.cancel_spell_cast(_selected_player_id):
+		_finish_cast("Cast canceled · Card and Mana kept.")
+
+
+func _on_cast_expired() -> void:
+	if _state.expire_spell_cast(_selected_player_id, Time.get_ticks_msec()):
+		_finish_cast("Cast expired · Card and Mana kept.")
+
+
+func _finish_cast(message: String) -> void:
+	var copy_id := _casting_copy
+	_casting_copy = -1
+	spell_feedback.text = message
+	_render()
+	var button: Button = _card_buttons.get(copy_id)
+	if button != null and not button.disabled:
+		button.grab_focus()
+	elif not end_turn_button.disabled:
+		end_turn_button.grab_focus()
+	else:
+		%BackButton.grab_focus()
 
 
 func _input(event: InputEvent) -> void:
+	if _casting_copy >= 0:
+		return
 	# The same footer position can change from End Turn to Undo Ready, or start a new round.
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
 			and event.double_click and end_turn_button.is_visible_in_tree():

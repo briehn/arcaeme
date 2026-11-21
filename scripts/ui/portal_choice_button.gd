@@ -26,7 +26,7 @@ static func make(option: Dictionary) -> Button:
 	button.set_meta(&"portal_id", String(option.id))
 	var branches := PackedStringArray()
 	for branch: Dictionary in option.branches:
-		branches.append("%s (%s)" % [branch.name, String(branch.type).capitalize()])
+		branches.append(branch.type)
 	var preview := "No further portals" if branches.is_empty() else "Next portals: " + " / ".join(branches)
-	button.text = "Portal to %s  ·  %s\n%s" % [option.name, String(option.type).capitalize(), preview]
+	button.text = "%s\n%s" % [option.type, preview]
 	return button

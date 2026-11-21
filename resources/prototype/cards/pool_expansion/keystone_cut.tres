@@ -1,0 +1,23 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="1_card"]
+[ext_resource type="Script" path="res://scripts/combat/card_effect.gd" id="2_effect"]
+
+[sub_resource type="Resource" id="Effect_1"]
+script = ExtResource("2_effect")
+amount = 4
+
+[sub_resource type="Resource" id="Effect_2"]
+script = ExtResource("2_effect")
+kind = 3
+amount = 3
+
+[resource]
+script = ExtResource("1_card")
+id = &"keystone_cut"
+display_name = "Keystone Cut"
+mana_cost = 1
+approval_status = "Provisional"
+is_attack = true
+owner_class_id = &"battle_mage"
+effects = Array[ExtResource("2_effect")]([SubResource("Effect_1"), SubResource("Effect_2")])

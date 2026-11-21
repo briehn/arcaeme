@@ -224,6 +224,25 @@ layout_mode = 2
 tooltip_text = "Enable branching portals for solo and local Multi-Enemy Short Runs. Return to the main menu to start either run."
 text = "Portal Routes (Prototype)"
 
+[node name="BattleMagePool" type="CheckBox" parent="ContentPanel/MenuScroll/Pages/PrototypeNavigation"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Offer an expanded Battle Mage reward pool in solo and local Multi-Enemy Short Runs."
+text = "Expanded Battle Mage Rewards (Prototype)"
+
+[node name="SpellDrawing" type="CheckBox" parent="ContentPanel/MenuScroll/Pages/PrototypeNavigation"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Use the rune test deck in standalone solo and local combat. Run and network modes keep their existing decks."
+text = "Spell Drawing (Prototype)"
+
+[node name="SpellDrawingBypass" type="CheckBox" parent="ContentPanel/MenuScroll/Pages/PrototypeNavigation"]
+unique_name_in_owner = true
+layout_mode = 2
+disabled = true
+tooltip_text = "Resolve the rune test cards instantly at full base power."
+text = "Bypass Drawing (Testing)"
+
 [node name="StartEnemyVarietyRunButton" type="Button" parent="ContentPanel/MenuScroll/Pages/PrototypeNavigation"]
 unique_name_in_owner = true
 layout_mode = 2

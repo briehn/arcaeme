@@ -41,14 +41,14 @@ func options(source_id: StringName) -> Array[Dictionary]:
 		for next: StringName in _edges.get(target, []):
 			branches.append(_preview(next))
 		var option := _preview(target)
-		option.merge({"id": String(_portal_id(source_id, target)), "destination_id": String(target), "branches": branches})
+		option.merge({"id": String(_selection_id(source_id, target)), "branches": branches})
 		result.append(option)
 	return result
 
 
 func destination(source_id: StringName, portal_id: StringName) -> EncounterData:
 	for target: StringName in _edges.get(source_id, []):
-		if portal_id == _portal_id(source_id, target):
+		if portal_id == _selection_id(source_id, target):
 			return ENCOUNTERS[target]
 	return null
 
@@ -62,7 +62,21 @@ func resolve(choices: Array[StringName]) -> StringName:
 
 func _preview(id: StringName) -> Dictionary:
 	var encounter: EncounterData = ENCOUNTERS[id]
-	return {"name": encounter.enemy_name, "type": "Boss" if id == BOSS else "Combat"}
+	return {"type": category_label(encounter.category)}
+
+
+static func category_label(category: EncounterData.Category) -> String:
+	match category:
+		EncounterData.Category.ELITE:
+			return "Elite Encounter"
+		EncounterData.Category.BOSS:
+			return "Boss Encounter"
+	return "Normal Encounter"
+
+
+func _selection_id(source_id: StringName, target: StringName) -> StringName:
+	# Send a stable selection token instead of the internal, readable edge ID.
+	return StringName(String(_portal_id(source_id, target)).sha256_text())
 
 
 func _portal_id(source_id: StringName, target: StringName) -> StringName:
