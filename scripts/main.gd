@@ -2,7 +2,6 @@ extends Control
 
 const CombatView = preload("res://scripts/combat.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
-const RunData = preload("res://scripts/run/run_data.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 const EnemyPlaytestSelector = preload("res://scripts/ui/enemy_playtest_selector.gd")
 const RuneCanvas = preload("res://scripts/ui/rune_canvas.gd")
@@ -15,6 +14,7 @@ const MULTI_ENEMY_RUN = preload("res://resources/prototype/multi_enemy_run.tres"
 const LOCAL_COOP_SCENE = preload("res://scenes/local_coop.tscn")
 const SPELL_DRAWING = preload("res://resources/prototype/spell_drawing_settings.tres")
 const SPELL_INK_BOOSTER = preload("res://resources/prototype/cards/spell_ink_booster.tres")
+const ALPHA_FEATURE := "arcaeme_alpha"
 
 @onready var enemy_playtest: EnemyPlaytestSelector = %EnemyPlaytest
 @onready var card_expansion: CheckBox = %CardExpansion
@@ -29,9 +29,21 @@ var _enemy_local_coop_button: Button
 
 
 func _ready() -> void:
-	enemy_playtest.item_selected.connect(_on_enemy_playtest_selected)
 	resized.connect(_fit_logo_area)
 	_fit_logo_area()
+	if OS.has_feature(ALPHA_FEATURE):
+		%PrimaryNavigation.hide()
+		%AlphaNavigation.show()
+		var build := String(ProjectSettings.get_setting("application/config/version"))
+		%AlphaBuild.text = "Build " + build
+		get_window().title = "Arcaeme " + build
+		var engine := Engine.get_version_info()
+		print("Arcaeme %s | Godot %d.%d.%d.%s.%s.%s" % [
+			build, engine.major, engine.minor, engine.patch, engine.status, engine.build, String(engine.hash).left(9)])
+		_setup_drawing_input_mode(%AlphaDrawingInputMode)
+		%StartAlphaRun.grab_focus()
+		return
+	enemy_playtest.item_selected.connect(_on_enemy_playtest_selected)
 	var unchecked := _checkbox_marker(false)
 	var checked := _checkbox_marker(true)
 	for toggle: CheckBox in [major_arcana, portal_prototype, battle_mage_pool, card_expansion,
@@ -39,14 +51,18 @@ func _ready() -> void:
 		toggle.add_theme_icon_override(&"unchecked", unchecked)
 		toggle.add_theme_icon_override(&"checked", checked)
 	spell_drawing.toggled.connect(_set_drawing_bypass_available)
-	drawing_input_mode.add_item("Hold Left Click", RuneCanvas.DrawingMode.HOLD)
-	drawing_input_mode.add_item("Toggle Drawing", RuneCanvas.DrawingMode.TOGGLE)
-	drawing_input_mode.select(drawing_input_mode.get_item_index(RuneCanvas.session_input_mode))
-	drawing_input_mode.item_selected.connect(_set_drawing_input_mode)
+	_setup_drawing_input_mode(drawing_input_mode)
 
 
-func _set_drawing_input_mode(index: int) -> void:
-	RuneCanvas.session_input_mode = drawing_input_mode.get_item_id(index) as RuneCanvas.DrawingMode
+func _setup_drawing_input_mode(selector: OptionButton) -> void:
+	selector.add_item("Hold Left Click", RuneCanvas.DrawingMode.HOLD)
+	selector.add_item("Toggle Drawing", RuneCanvas.DrawingMode.TOGGLE)
+	selector.select(selector.get_item_index(RuneCanvas.session_input_mode))
+	selector.item_selected.connect(_set_drawing_input_mode.bind(selector))
+
+
+func _set_drawing_input_mode(index: int, selector: OptionButton) -> void:
+	RuneCanvas.session_input_mode = selector.get_item_id(index) as RuneCanvas.DrawingMode
 
 
 func _set_drawing_bypass_available(enabled: bool) -> void:
@@ -70,6 +86,8 @@ func _checkbox_marker(checked: bool) -> Texture2D:
 
 
 func _show_prototype_tools(show_tools: bool) -> void:
+	if OS.has_feature(ALPHA_FEATURE):
+		return
 	%PrimaryNavigation.visible = not show_tools
 	%PrototypeNavigation.visible = show_tools
 	%BackFromTools.visible = show_tools
@@ -100,23 +118,38 @@ func _on_start_enemy_variety_run_pressed() -> void:
 
 
 func _start_multi_enemy_run(local_coop: bool) -> void:
-	var run: PrototypeRunView = PROTOTYPE_RUN_SCENE.instantiate()
-	run.run_data = MULTI_ENEMY_RUN
-	if major_arcana.button_pressed or portal_prototype.button_pressed:
-		run.run_data = MULTI_ENEMY_RUN.duplicate()
-		run.run_data.major_arcana_enabled = major_arcana.button_pressed
-		run.run_data.portal_enabled = portal_prototype.button_pressed
+	var run := _make_multi_enemy_run(portal_prototype.button_pressed, major_arcana.button_pressed)
 	if battle_mage_pool.button_pressed:
 		run.run_data = BattleMagePoolPlaytest.with_expanded_rewards(run.run_data)
 	if spell_drawing.button_pressed:
-		var pilot: RunData = run.run_data.duplicate()
-		pilot.starting_deck = run.run_data.starting_deck.duplicate()
-		pilot.starting_deck.append(SPELL_INK_BOOSTER)
-		run.run_data = pilot
-		run.spell_drawing = SPELL_DRAWING
+		_enable_run_drawing(run)
 		run.bypass_drawing = spell_drawing_bypass.button_pressed
 	run.local_coop = local_coop
 	get_tree().change_scene_to_node(run)
+
+
+func _start_alpha_run() -> void:
+	var run := _make_multi_enemy_run(true, false)
+	_enable_run_drawing(run)
+	get_tree().change_scene_to_node(run)
+
+
+func _make_multi_enemy_run(portals: bool, arcana_enabled: bool) -> PrototypeRunView:
+	var run: PrototypeRunView = PROTOTYPE_RUN_SCENE.instantiate()
+	run.run_data = MULTI_ENEMY_RUN.duplicate()
+	run.run_data.portal_enabled = portals
+	run.run_data.major_arcana_enabled = arcana_enabled
+	return run
+
+
+func _enable_run_drawing(run: PrototypeRunView) -> void:
+	run.run_data.starting_deck = run.run_data.starting_deck.duplicate()
+	run.run_data.starting_deck.append(SPELL_INK_BOOSTER)
+	run.spell_drawing = SPELL_DRAWING
+
+
+func _quit_alpha() -> void:
+	get_tree().quit()
 
 
 func _on_start_local_coop_pressed() -> void:

@@ -197,13 +197,40 @@ text = "Major Arcana (Prototype)"
 [node name="StartNetworkCoopButton" type="Button" parent="ContentPanel/MenuScroll/Pages/PrimaryNavigation" unique_id=1189372291]
 unique_name_in_owner = true
 layout_mode = 2
-text = "Start Network Co-op Test"
+text = "Network Co-op Test (Localhost Only)"
+tooltip_text = "Development test for multiple Arcaeme instances on this computer."
 alignment = 0
 
 [node name="OpenPrototypeTools" type="Button" parent="ContentPanel/MenuScroll/Pages/PrimaryNavigation"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Prototype Tools"
+alignment = 0
+
+[node name="AlphaNavigation" type="VBoxContainer" parent="ContentPanel/MenuScroll/Pages"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="StartAlphaRun" type="Button" parent="ContentPanel/MenuScroll/Pages/AlphaNavigation"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Start Battle Mage Short Run"
+alignment = 0
+
+[node name="AlphaDrawingInputMode" type="OptionButton" parent="ContentPanel/MenuScroll/Pages/AlphaNavigation"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Drawing input for this session. Toggle Drawing uses X by default."
+
+[node name="AlphaBuild" type="Label" parent="ContentPanel/MenuScroll/Pages/AlphaNavigation"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="QuitAlpha" type="Button" parent="ContentPanel/MenuScroll/Pages/AlphaNavigation"]
+layout_mode = 2
+text = "Quit"
 alignment = 0
 
 [node name="PrototypeNavigation" type="VBoxContainer" parent="ContentPanel/MenuScroll/Pages"]
@@ -306,3 +333,5 @@ alignment = 0
 [connection signal="pressed" from="ContentPanel/MenuScroll/Pages/PrototypeNavigation/EnemyPrototypeControls/StartEnemyPlaytestButton" to="." method="_on_start_enemy_playtest_pressed"]
 [connection signal="pressed" from="ContentPanel/MenuScroll/Pages/PrimaryNavigation/OpenPrototypeTools" to="." method="_show_prototype_tools" binds= [true]]
 [connection signal="pressed" from="ContentPanel/BackFromTools" to="." method="_show_prototype_tools" binds= [false]]
+[connection signal="pressed" from="ContentPanel/MenuScroll/Pages/AlphaNavigation/StartAlphaRun" to="." method="_start_alpha_run"]
+[connection signal="pressed" from="ContentPanel/MenuScroll/Pages/AlphaNavigation/QuitAlpha" to="." method="_quit_alpha"]
