@@ -90,11 +90,14 @@ func _test_solo() -> void:
 		"the usable surface starts the full timer once")
 	_check(panel.visible and guide_label.text == "Strike Rune" and cast_button.disabled and end_turn.disabled,
 		"target opens the rune overlay with timer, blank cast disabled, and End Turn locked")
+	_check("any order or direction" in (panel.find_child("Instructions", true, false) as Label).text,
+		"the guide describes free stroke order and direction")
 	_check(player.mana == 3 and player.hand.size() == 5 and state.action_history.is_empty(),
 		"showing the target-specific cast spends no Mana and removes no card")
 	_check(_fully_visible(canvas) and absf(canvas.size.aspect() - 1.0) < 0.01
 		and _fully_visible(panel.get_node("%TimeLabel")) and _fully_visible(cast_button),
 		"the square canvas, timer, and Cast control fit")
+	await _test_brush(canvas, panel, cast_button)
 
 	var escape := InputEventKey.new()
 	escape.keycode = KEY_ESCAPE
@@ -127,11 +130,14 @@ func _test_solo() -> void:
 	_check(panel.visible and "extra stroke" in guide_label.text and canvas._guide.size() == 3
 		and canvas._guide[-1] == ASTRA.rune_template.booster_stroke
 		and _connects_to_rune(canvas._guide), "the boosted Salvo visibly includes its connected third stroke")
-	for stroke in canvas._guide:
+	for index in [2, 0, 1]:
+		var stroke := canvas._guide[index].duplicate()
+		if index != 1:
+			stroke.reverse()
 		_draw_stroke(canvas, stroke)
 	await _click(cast_button)
 	_check(not panel.visible and "excellent" in combat.spell_feedback.text.to_lower()
-		and "130% base power" in combat.spell_feedback.text, "the mouse-drawn boosted Salvo reports excellent accuracy")
+		and "130% base power" in combat.spell_feedback.text, "shuffled and reversed mouse traces give an excellent boosted Salvo")
 	_check(state.enemy_state(FIRST_TARGET).hp == 18 and state.enemy_state(SECOND_TARGET).hp == 4,
 		"both 9-damage hits resolve against only the selected enemy")
 	_check(player.mana == 0 and player.hand.size() == 3 and player.discard_pile.size() == 2
@@ -152,6 +158,8 @@ func _test_expiry() -> void:
 	_check(panel.visible and canvas._guide.size() == 3 and player.mana == 2,
 		"the short expiry fixture starts a primed cast with its card and Mana reserved")
 	var outline: PackedVector2Array = ASTRA.rune_template.strokes[0]
+	outline = outline.duplicate()
+	outline.reverse()
 	_draw_stroke(canvas, outline, false)
 	var release_position := canvas.get_global_transform_with_canvas() * canvas._local_points(outline)[-1]
 	_check((panel.get_node("%SubmitButton") as Button).disabled,
@@ -164,14 +172,60 @@ func _test_expiry() -> void:
 		"expiry recognizes the held outline as a partial spell with reduced power")
 	_check(state.enemy_state(FIRST_TARGET).hp == 18 and state.enemy_state(SECOND_TARGET).hp == 12
 		and player.mana == 0 and player.hand.size() == 3 and player.discard_pile.size() == 2
-		and player.spell_booster_primed and state.action_history.size() == 2,
-		"partial expiry resolves both hits, spends once, and preserves the undrawn booster")
+		and not player.spell_booster_primed and state.action_history.size() == 2,
+		"partial expiry resolves both hits, spends once, and consumes the undrawn booster")
 	_mouse_button(release_position, false)
 	await _settle()
 	_check(not panel.visible and state.enemy_state(SECOND_TARGET).hp == 12 and state.action_history.size() == 2,
 		"releasing after automatic resolution cannot reopen or resolve the spell again")
 	combat.queue_free()
 	await _settle()
+
+
+func _test_brush(canvas: RuneCanvas, panel: Control, cast_button: Button) -> void:
+	var surface := canvas._surface()
+	var origin := canvas.get_global_transform_with_canvas()
+	var overlay := canvas._brush_overlay
+	var cursor := canvas.mouse_default_cursor_shape
+	var start := surface.position + surface.size * 0.35
+	var tip := surface.position + surface.size * 0.65
+	var expected_width := 9.0 * surface.size.x / 348.0
+	_check(is_equal_approx(canvas.reference_ink_width, 9.0) and is_equal_approx(canvas._ink_width(), expected_width),
+		"visible ink scales from a 9 px reference diameter")
+	canvas.reference_ink_width = 12.0
+	_check(is_equal_approx(canvas._ink_width(), expected_width * 12.0 / 9.0), "brush diameter is configurable")
+	canvas.reference_ink_width = 9.0
+	_mouse_motion(origin * start)
+	_check(overlay.is_visible_in_tree() and overlay.position.is_equal_approx(start)
+		and overlay.get_parent() == canvas and not overlay.show_behind_parent and canvas.mouse_default_cursor_shape == cursor,
+		"hover centers a separate overlay above the guide while keeping the existing cursor")
+	_check(canvas.completed_strokes(true).is_empty() and canvas._current.is_empty() and cast_button.disabled,
+		"hover previews the brush without depositing or preparing ink")
+	_mouse_motion(origin * Vector2(5.0, 5.0))
+	_check(not overlay.visible and canvas.mouse_default_cursor_shape == cursor,
+		"canvas padding hides the footprint and keeps the normal cursor")
+	_mouse_motion(origin * start)
+	_check(overlay.visible and canvas._current.is_empty(), "reentry restores the preview without drawing")
+	_mouse_button(origin * start, true)
+	_mouse_motion(origin * tip, MOUSE_BUTTON_MASK_LEFT)
+	_check(overlay.visible and overlay.position.is_equal_approx(tip) and canvas.mouse_default_cursor_shape == cursor
+		and canvas._current.size() == 2 and cast_button.disabled,
+		"the brush follows the held pointer while only pressed motion deposits ink")
+	_mouse_button(origin * tip, false)
+	var recorded := canvas.completed_strokes()
+	_mouse_motion(Vector2(2.0, 2.0))
+	_check(not overlay.visible and canvas.completed_strokes() == recorded and not cast_button.disabled,
+		"leaving the canvas hides the preview and retains only the finished ink")
+	await _click(panel.get_node("%ClearButton"))
+	_check(canvas.completed_strokes(true).is_empty() and cast_button.disabled, "Clear still erases the captured ink")
+
+
+func _mouse_motion(position: Vector2, mask := 0) -> void:
+	var event := InputEventMouseMotion.new()
+	event.button_mask = mask
+	event.position = position
+	event.global_position = position
+	_viewport.push_input(event, true)
 
 
 func _test_local() -> void:

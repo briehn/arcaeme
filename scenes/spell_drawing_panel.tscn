@@ -90,7 +90,7 @@ theme_override_colors/font_color = Color(0.73, 0.88, 0.98, 1)
 
 [node name="Instructions" type="Label" parent="Margin/Panel/Content"]
 layout_mode = 2
-text = "Trace the arrows. Lift between strokes. Time up submits."
+text = "Trace each line in any order or direction. Lift between strokes."
 
 [node name="RuneCanvas" type="Control" parent="Margin/Panel/Content"]
 unique_name_in_owner = true

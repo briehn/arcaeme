@@ -41,13 +41,37 @@ func _test_matching() -> void:
 	for card in [STRIKE, BLOCK, SALVO]:
 		var guide: Array[PackedVector2Array] = card.rune_template.strokes
 		_check(_score(guide, guide) == 1.0, "%s exact rune matches" % card.display_name)
+		var reversed := _reversed_strokes(guide)
+		_check(is_equal_approx(_score(guide, reversed), 1.0), "%s matches with all strokes reversed" % card.display_name)
 		_check(is_equal_approx(_score(guide, _resampled(guide)), 1.0),
 			"%s tolerates translation, scale, and dense input" % card.display_name)
 		_check(_score(guide, []) == 0.0, "empty drawing fails")
 	var salvo: Array[PackedVector2Array] = SALVO.rune_template.strokes
 	var outline := _recognize(salvo, [salvo[0]])
-	_check(_score(salvo, [salvo[1], salvo[0]]) == 0.0 and outline != null and not outline.complete,
-		"swapped strokes reject while the recognizable outline is incomplete")
+	_check(is_equal_approx(_score(salvo, [salvo[1], salvo[0]]), 1.0) and outline != null and not outline.complete,
+		"swapped strokes match while the recognizable outline alone is incomplete")
+	var off_corner := salvo[0][1].lerp(salvo[0][2], 0.47)
+	var shifted := PackedVector2Array([off_corner, salvo[0][2], salvo[0][3], salvo[0][0], salvo[0][1], off_corner])
+	var shifted_match := _recognize(salvo, [_reverse(salvo[1]), _reverse(shifted)])
+	_check(shifted_match != null and shifted_match.complete and shifted_match.score >= SETTINGS.excellent_score,
+		"a reversed Salvo outline started along an edge matches at excellent power")
+	var partial := _recognize(STRIKE.rune_template.strokes, [_reverse(_partial_strike()[0])])
+	_check(partial != null and not partial.complete, "a recognizable partial stroke can be traced backwards")
+	var short_line := PackedVector2Array([salvo[1][0].lerp(salvo[1][1], 0.65), salvo[1][0]])
+	var partial_salvo := _recognize(salvo, [short_line, _reverse(salvo[0])])
+	_check(partial_salvo != null and SETTINGS.quality(partial_salvo.score, partial_salvo.complete) == "Faint",
+		"a shortened line before the outline remains a faint Salvo")
+	_check(_score(salvo, [salvo[0], _reverse(shifted)]) == 0.0
+		and _score(salvo, [salvo[1], _reverse(salvo[1])]) == 0.0
+		and _score(salvo, [salvo[1]]) == 0.0, "repeated components and a lone line do not replace Salvo structure")
+	_check(_score(salvo, BLOCK.rune_template.strokes) == 0.0, "a single Block corner cannot stand in for a partial loop")
+	var augmented := salvo.duplicate()
+	augmented.append(SALVO.rune_template.booster_stroke)
+	for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]:
+		var shuffled: Array[PackedVector2Array] = [_reverse(augmented[order[0]]),
+			augmented[order[1]], _reverse(augmented[order[2]])]
+		_check(is_equal_approx(_score(augmented, shuffled), 1.0),
+			"boosted Salvo has the same score in component order %s" % str(order))
 	var arm := PackedVector2Array([STRIKE.rune_template.strokes[0][0], STRIKE.rune_template.strokes[0][1]])
 	_check(_score(STRIKE.rune_template.strokes, [arm]) == 0.0,
 		"a long straight swipe cannot replace a rune corner")
@@ -59,11 +83,8 @@ func _test_matching() -> void:
 	var scribble := PackedVector2Array([Vector2(0.28, 0.20), Vector2(0.75, 0.2), Vector2(0.28, 0.40),
 		Vector2(0.75, 0.50), Vector2(0.28, 0.70), Vector2(0.75, 0.80)])
 	_check(_score(STRIKE.rune_template.strokes, [scribble]) == 0.0, "a large unrelated zigzag cannot cast")
-	var reversed := STRIKE.rune_template.strokes[0].duplicate()
-	reversed.reverse()
-	_check(_score(STRIKE.rune_template.strokes, [reversed]) == 0.0
-		and _score(STRIKE.rune_template.strokes, BLOCK.rune_template.strokes) == 0.0,
-		"a backwards or unrelated rune fails")
+	_check(_score(STRIKE.rune_template.strokes, BLOCK.rune_template.strokes) == 0.0,
+		"an unrelated rune still fails")
 	var tiny := PackedVector2Array([Vector2(0.1, 0.1), Vector2(0.11, 0.11)])
 	var malformed := PackedVector2Array([Vector2(0, 0), Vector2(INF, 1)])
 	_check(_score(STRIKE.rune_template.strokes, [tiny]) == 0.0
@@ -90,11 +111,13 @@ func _test_matching() -> void:
 		var combat := _combat()
 		combat.play_card(MAGE, _copy(combat, BOOSTER), &"")
 		var cast := _start(combat, _copy(combat, card), FIRST if card.is_attack else &"")
+		var shuffled := _reversed_strokes(cast.guide)
+		shuffled.reverse()
 		_check(not cast.is_empty() and cast.guide[-1] == rune.booster_stroke
-			and combat.submit_spell_cast(MAGE, cast.guide, NOW + 1) == CombatState.CastResult.SUCCESS
+			and combat.submit_spell_cast(MAGE, shuffled, NOW + 1) == CombatState.CastResult.SUCCESS
 			and combat.action_history.back().spell_power_percent == 130
 			and not combat.players[MAGE].spell_booster_primed,
-			"%s resolves its exact augmented guide and consumes its Booster" % card.display_name)
+			"%s resolves with its augmentation first and consumes its Booster" % card.display_name)
 
 
 func _test_cast_transaction() -> void:
@@ -220,6 +243,13 @@ func _test_booster_and_ordered_hits() -> void:
 	_start(combat, salvo, SECOND)
 	_check(combat.expire_spell_cast(MAGE, [], cast.deadline_ms) == CombatState.CastResult.EXPIRED
 		and actor.spell_booster_primed, "expiry retains the Booster")
+	_start(combat, salvo, SECOND)
+	_check(combat.submit_spell_cast(MAGE, BLOCK.rune_template.strokes, NOW + 1) == CombatState.CastResult.MISDRAWN
+		and actor.spell_booster_primed and actor.mana == 3, "an unrecognized attempt preserves the Booster and Mana")
+	_start(combat, salvo, SECOND)
+	_check(combat.submit_spell_cast(MAGE, [cast.guide[0], cast.guide[1], _reverse(cast.guide[0])], NOW + 1)
+		== CombatState.CastResult.MISDRAWN and actor.spell_booster_primed and actor.mana == 3,
+		"the failed-augmentation fallback cannot discard a duplicate to salvage a cast")
 	actor.strength = 2
 	actor.next_attack_bonus = 3
 	combat.enemy_state(SECOND).hp = 50
@@ -241,18 +271,21 @@ func _test_booster_and_ordered_hits() -> void:
 		"consumption never clears the shared card resource")
 	var base_only := _start(fresh, _copy(fresh, SALVO), SECOND)
 	_check(base_only.boosted and fresh.submit_spell_cast(MAGE, SALVO.rune_template.strokes, NOW + 1)
-		== CombatState.CastResult.SUCCESS and fresh.players[MAGE].spell_booster_primed
+		== CombatState.CastResult.SUCCESS and not fresh.players[MAGE].spell_booster_primed
 		and fresh.players[MAGE].mana == 0 and fresh.action_history.back().spell_power_percent == 75,
-		"a recognizable base rune with no augmentation resolves faint and keeps the Booster")
+		"a recognizable base rune consumes the Booster without applying its bonus")
 	fresh = _combat()
 	fresh.play_card(MAGE, _copy(fresh, BOOSTER), &"")
 	var attempted := _start(fresh, _copy(fresh, SALVO), SECOND)
 	var strokes: Array[PackedVector2Array] = SALVO.rune_template.strokes.duplicate()
-	strokes.append(PackedVector2Array([Vector2(0.50, 0.19), Vector2(0.50, 0.21)]))
+	strokes.push_front(PackedVector2Array([Vector2(0.50, 0.19), Vector2(0.50, 0.21)]))
 	_check(fresh.expire_spell_cast(MAGE, strokes, attempted.deadline_ms) == CombatState.CastResult.SUCCESS
-		and fresh.players[MAGE].spell_booster_primed and fresh.players[MAGE].mana == 0
+		and not fresh.players[MAGE].spell_booster_primed and fresh.players[MAGE].mana == 0
 		and fresh.action_history.back().spell_power_percent == 75,
-		"expiry salvages the recognizable base rune when the extra stroke is too short")
+		"expiry resolves the base rune and consumes the charge when the first stroke is a failed augmentation")
+	_check(fresh.expire_spell_cast(MAGE, attempted.guide, attempted.deadline_ms + 1) == CombatState.CastResult.NO_CAST
+		and fresh.action_history.size() == 2 and fresh.players[MAGE].mana == 0,
+		"duplicate resolution cannot spend again or apply the Booster bonus")
 
 
 func _test_local_ownership() -> void:
@@ -312,6 +345,19 @@ func _start(combat: CombatState, copy: int, target: StringName) -> Dictionary:
 func _partial_strike() -> Array[PackedVector2Array]:
 	var guide: PackedVector2Array = STRIKE.rune_template.strokes[0]
 	return [PackedVector2Array([guide[0], guide[1], guide[1].lerp(guide[2], 0.57)])]
+
+
+func _reverse(stroke: PackedVector2Array) -> PackedVector2Array:
+	var result := stroke.duplicate()
+	result.reverse()
+	return result
+
+
+func _reversed_strokes(strokes: Array[PackedVector2Array]) -> Array[PackedVector2Array]:
+	var result: Array[PackedVector2Array] = []
+	for stroke in strokes:
+		result.append(_reverse(stroke))
+	return result
 
 
 func _resampled(strokes: Array[PackedVector2Array]) -> Array[PackedVector2Array]:

@@ -7,5 +7,5 @@ script = ExtResource("1_card")
 id = &"spell_ink_booster"
 display_name = "Spell Ink Booster"
 mana_cost = 1
-description_override = "Instant Booster. Add a stroke to your next rune and increase its base power on success. Does not stack."
+description_override = "Instant Booster. Your next eligible cast uses this charge. Trace its extra stroke for bonus power. Does not stack."
 is_spell_booster = true

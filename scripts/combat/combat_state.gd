@@ -239,21 +239,22 @@ func submit_spell_cast(player_id: StringName, strokes: Array[PackedVector2Array]
 	var recognized := _match_spell_rune(cast.guide if boosted else base_guide, strokes)
 	if boosted and recognized == null:
 		# A failed added stroke can leave enough ink for the ordinary spell.
-		recognized = _match_spell_rune(base_guide, strokes.slice(0, base_guide.size()))
+		recognized = _match_spell_rune(base_guide, strokes, true)
 		boosted = false
 	if recognized == null:
 		return CastResult.EXPIRED if now_ms >= cast.deadline_ms else CastResult.MISDRAWN
 	var quality := _spell_drawing.quality(recognized.score, recognized.complete and (not cast.boosted or boosted))
 	var player := players[player_id]
-	if boosted:
+	if cast.boosted:
 		player.spell_booster_primed = false
 	_resolve_card(player, cast.copy_id, cast.target_id, _spell_drawing.power_percent(quality, boosted), quality)
 	return CastResult.SUCCESS
 
 
-func _match_spell_rune(guide: Array[PackedVector2Array], strokes: Array[PackedVector2Array]) -> RuneMatcher.MatchResult:
+func _match_spell_rune(guide: Array[PackedVector2Array], strokes: Array[PackedVector2Array],
+		allow_failed_augmentation := false) -> RuneMatcher.MatchResult:
 	return RuneMatcher.recognize(guide, strokes, _spell_drawing.minimum_extent,
-		_spell_drawing.recognition_tolerance, _spell_drawing.minimum_coverage)
+		_spell_drawing.recognition_tolerance, _spell_drawing.minimum_coverage, allow_failed_augmentation)
 
 
 func expire_spell_cast(player_id: StringName, strokes: Array[PackedVector2Array], now_ms: int) -> CastResult:
