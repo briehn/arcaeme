@@ -1,6 +1,7 @@
 extends Control
 
 const CardData = preload("res://scripts/combat/card_data.gd")
+const CastingPacing = preload("res://scripts/run/casting_pacing.gd")
 const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
 const CombatState = preload("res://scripts/combat/combat_state.gd")
 const CombatView = preload("res://scripts/combat.gd")
@@ -11,6 +12,7 @@ const PacingVariantPicker = preload("res://scripts/ui/pacing_variant_picker.gd")
 const PortalChoiceButton = preload("res://scripts/ui/portal_choice_button.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const RunState = preload("res://scripts/run/run_state.gd")
+const SpellDrawingSettings = preload("res://scripts/combat/spell_drawing_settings.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 const LOCAL_MAGES: Array[StringName] = [&"Battle Mage 1", &"Battle Mage 2"]
@@ -18,6 +20,8 @@ const LOCAL_MAGES: Array[StringName] = [&"Battle Mage 1", &"Battle Mage 2"]
 @export var run_data: RunData
 @export var enable_pacing_variants := false
 @export var local_coop := false
+var spell_drawing: SpellDrawingSettings
+var bypass_drawing := false
 
 @onready var run_panel: MarginContainer = %RunPanel
 @onready var heading: Label = %Heading
@@ -36,20 +40,24 @@ var _local_run: CoopRunState
 var _combat_view: CombatView
 var _local_choice_index := 0
 var _local_choice_revealed := false
+var _casting_pacing: CastingPacing
 
 
 func _ready() -> void:
+	if spell_drawing != null and not bypass_drawing and OS.is_debug_build():
+		_casting_pacing = CastingPacing.new(LOCAL_MAGES.size() if local_coop else 1)
+		heading.mouse_filter = Control.MOUSE_FILTER_PASS
 	pacing_variant_field.item_selected.connect(_on_pacing_variant_selected)
 	if not run_data.title.is_empty():
 		$RunPanel/Layout/Title.text = run_data.title
 	if local_coop:
-		_local_run = CoopRunState.new(run_data, LOCAL_MAGES)
+		_local_run = CoopRunState.new(run_data, LOCAL_MAGES, null, spell_drawing, bypass_drawing)
 		if _local_run.stage == CoopRunState.ARCANA:
 			_render_panel()
 		else:
 			_show_local_combat()
 		return
-	_run = RunState.new(run_data)
+	_run = RunState.new(run_data, spell_drawing, bypass_drawing)
 	_render_panel()
 
 
@@ -61,6 +69,8 @@ func _render_panel(focus_choice := true) -> void:
 		_render_local_panel()
 	else:
 		_render_solo_panel()
+	if _casting_pacing != null:
+		heading.tooltip_text = _casting_pacing.tooltip()
 	run_panel.show()
 	if focus_choice:
 		var focus_target: Button = choices.get_child(0) if choices.get_child_count() > 0 else back_button
@@ -259,7 +269,7 @@ func _on_pacing_variant_selected(_index: int) -> void:
 	var variant := pacing_variant_field.selected_variant()
 	run_data = _pacing_template if variant == PacingExperiment.VariantKind.BASELINE \
 		else PacingExperiment.make_run(_pacing_template, variant, 1)
-	_run = RunState.new(run_data)
+	_run = RunState.new(run_data, spell_drawing, bypass_drawing)
 	_render_panel(false)
 
 
@@ -329,19 +339,25 @@ func _encounter_title(index: int, encounter: EncounterData) -> String:
 func _show_solo_combat(stage_title: String) -> void:
 	if _multi_enemy_route():
 		stage_title = _encounter_title(_run.encounter_id, _run.active_encounter)
-	_show_combat(_run.active_combat, _run.active_encounter, stage_title)
+	_show_combat(_run.active_combat, _run.active_encounter, stage_title, _run.encounter_id)
 
 
 func _show_local_combat() -> void:
 	_show_combat(_local_run.active_combat, _local_run.active_encounter,
-		_encounter_title(_local_run.encounter_id, _local_run.active_encounter))
+		_encounter_title(_local_run.encounter_id, _local_run.active_encounter), _local_run.encounter_id)
 
 
-func _show_combat(combat: CombatState, encounter: EncounterData, stage_title: String) -> void:
+func _show_combat(combat: CombatState, encounter: EncounterData, stage_title: String, index: int) -> void:
 	run_panel.hide()
 	_combat_view = COMBAT_SCENE.instantiate()
 	var run_title := "Prototype Run" if run_data.title.is_empty() else run_data.title
 	_combat_view.configure_run(combat, encounter, "%s  /  %s" % [run_title, stage_title])
+	_combat_view.spell_drawing = spell_drawing
+	_combat_view.bypass_drawing = bypass_drawing
+	if _casting_pacing != null:
+		_casting_pacing.begin_encounter(index)
+		_combat_view.drawing_prompt_opened.connect(_casting_pacing.prompt_opened.bind(index))
+		_combat_view.drawing_attempt_finished.connect(_casting_pacing.attempt_finished.bind(index))
 	_combat_view.encounter_finished.connect(_finish_encounter)
 	add_child(_combat_view)
 

@@ -2,6 +2,7 @@ extends Control
 
 const CombatView = preload("res://scripts/combat.gd")
 const EncounterData = preload("res://scripts/combat/encounter_data.gd")
+const RunData = preload("res://scripts/run/run_data.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 const EnemyPlaytestSelector = preload("res://scripts/ui/enemy_playtest_selector.gd")
 const CardExpansionPlaytest = preload("res://scripts/run/card_expansion_playtest.gd")
@@ -12,6 +13,7 @@ const ENEMY_VARIETY_RUN_SCENE = preload("res://scenes/enemy_variety_run.tscn")
 const MULTI_ENEMY_RUN = preload("res://resources/prototype/multi_enemy_run.tres")
 const LOCAL_COOP_SCENE = preload("res://scenes/local_coop.tscn")
 const SPELL_DRAWING = preload("res://resources/prototype/spell_drawing_settings.tres")
+const SPELL_INK_BOOSTER = preload("res://resources/prototype/cards/spell_ink_booster.tres")
 
 @onready var enemy_playtest: EnemyPlaytestSelector = %EnemyPlaytest
 @onready var card_expansion: CheckBox = %CardExpansion
@@ -96,6 +98,13 @@ func _start_multi_enemy_run(local_coop: bool) -> void:
 		run.run_data.portal_enabled = portal_prototype.button_pressed
 	if battle_mage_pool.button_pressed:
 		run.run_data = BattleMagePoolPlaytest.with_expanded_rewards(run.run_data)
+	if spell_drawing.button_pressed:
+		var pilot: RunData = run.run_data.duplicate()
+		pilot.starting_deck = run.run_data.starting_deck.duplicate()
+		pilot.starting_deck.append(SPELL_INK_BOOSTER)
+		run.run_data = pilot
+		run.spell_drawing = SPELL_DRAWING
+		run.bypass_drawing = spell_drawing_bypass.button_pressed
 	run.local_coop = local_coop
 	get_tree().change_scene_to_node(run)
 

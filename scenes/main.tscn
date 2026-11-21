@@ -233,7 +233,7 @@ text = "Expanded Battle Mage Rewards (Prototype)"
 [node name="SpellDrawing" type="CheckBox" parent="ContentPanel/MenuScroll/Pages/PrototypeNavigation"]
 unique_name_in_owner = true
 layout_mode = 2
-tooltip_text = "Use the rune test deck in standalone solo and local combat. Run and network modes keep their existing decks."
+tooltip_text = "Enable rune casting in standalone solo or local combat and Multi-Enemy Short Runs."
 text = "Spell Drawing (Prototype)"
 
 [node name="SpellDrawingBypass" type="CheckBox" parent="ContentPanel/MenuScroll/Pages/PrototypeNavigation"]

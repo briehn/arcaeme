@@ -6,6 +6,7 @@ const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const MajorArcana = preload("res://scripts/run/major_arcana.gd")
 const PortalRoute = preload("res://scripts/run/portal_route.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
+const SpellDrawingSettings = preload("res://scripts/combat/spell_drawing_settings.gd")
 
 enum Stage {
 	ROUTE, OPENING_COMBAT, REWARD, BOSS_READY, BOSS_COMBAT, VICTORY, DEFEAT,
@@ -32,10 +33,14 @@ var _reward_choices: Array[StringName] = []
 var _arcana_offers: Array[StringName] = []
 var _rng := RandomNumberGenerator.new()
 var _portal_route: PortalRoute
+var _spell_drawing: SpellDrawingSettings
+var _bypass_drawing: bool
 
 
-func _init(data: RunData) -> void:
+func _init(data: RunData, spell_drawing: SpellDrawingSettings = null, bypass_drawing := false) -> void:
 	_data = data
+	_spell_drawing = spell_drawing
+	_bypass_drawing = bypass_drawing
 	run_seed = data.run_seed
 	_rng.seed = run_seed
 	max_hp = data.player_max_hp
@@ -181,6 +186,6 @@ func _start_combat(definition: EncounterData, next_stage: Stage) -> void:
 	active_encounter.shuffle_seed = _rng.randi()
 	var arcana: Dictionary[StringName, StringName] = {PLAYER_ID: selected_arcana}
 	active_combat = CombatState.new(active_encounter, active_encounter.shuffle_seed,
-		[PLAYER_ID], current_hp, {}, {}, arcana)
+		[PLAYER_ID], current_hp, {}, {}, arcana, _spell_drawing, _bypass_drawing)
 	encounter_id += 1
 	stage = next_stage

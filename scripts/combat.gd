@@ -17,6 +17,8 @@ const CAST_FEEDBACK_COLORS := {
 }
 
 signal encounter_finished(combat: CombatState)
+signal drawing_prompt_opened
+signal drawing_attempt_finished(seat: int, quality: String, reason: String, elapsed_ms: int)
 signal network_card_requested(copy_id: int, target_id: StringName)
 signal network_end_turn_requested
 signal network_undo_ready_requested
@@ -55,6 +57,7 @@ var _living_enemy_ids: Array[StringName] = []
 var _enemy_buttons: Dictionary[StringName, WrappedTextButton] = {}
 var _spell_panel: SpellDrawingPanel
 var _casting_copy := -1
+var _cast_opened_ms := 0
 
 
 func configure_run(combat: CombatState, run_encounter: EncounterData, title: String) -> void:
@@ -427,6 +430,8 @@ func _submit_card(copy_id: int, target: StringName) -> void:
 		_render()
 		if not cast.is_empty():
 			_casting_copy = copy_id
+			_cast_opened_ms = Time.get_ticks_msec()
+			drawing_prompt_opened.emit()
 			var rune_name := String(cast.rune_name) + (" · extra stroke" if cast.boosted else "")
 			_spell_panel.open_cast(cast.card_name, rune_name, cast.guide)
 		return
@@ -470,11 +475,14 @@ func _on_drawing_submitted(strokes: Array[PackedVector2Array]) -> void:
 
 
 func _show_cast_result(result: CombatState.CastResult, timed_out: bool) -> void:
+	if _casting_copy < 0:
+		return
+	var quality: String = _state.action_history.back()[&"spell_quality"] if result == CombatState.CastResult.SUCCESS else ""
+	_report_drawing_attempt(quality, "expired" if timed_out else "submitted")
 	match result:
 		CombatState.CastResult.SUCCESS:
 			var action: Dictionary = _state.action_history.back()
 			var prefix := "Time up · " if timed_out else ""
-			var quality: String = action[&"spell_quality"]
 			_finish_cast("%s%s cast · %d%% base power." % [
 				prefix, quality, action[&"spell_power_percent"]], CAST_FEEDBACK_COLORS[quality])
 		CombatState.CastResult.MISDRAWN:
@@ -487,11 +495,24 @@ func _show_cast_result(result: CombatState.CastResult, timed_out: bool) -> void:
 
 func _on_cast_canceled() -> void:
 	if _state.cancel_spell_cast(_selected_player_id):
+		_report_drawing_attempt("", "canceled")
 		_finish_cast("Cast canceled · Card and Mana kept.")
 
 
 func _on_cast_expired(strokes: Array[PackedVector2Array]) -> void:
 	_show_cast_result(_state.expire_spell_cast(_selected_player_id, strokes, Time.get_ticks_msec()), true)
+
+
+func _exit_tree() -> void:
+	if _casting_copy >= 0:
+		_state.cancel_spell_cast(_selected_player_id)
+		_report_drawing_attempt("", "canceled")
+		_casting_copy = -1
+
+
+func _report_drawing_attempt(quality: String, reason: String) -> void:
+	var seat := _state.players.keys().find(_selected_player_id) + 1
+	drawing_attempt_finished.emit(seat, quality, reason, Time.get_ticks_msec() - _cast_opened_ms)
 
 
 func _finish_cast(message: String, color := Color("#edc0b3")) -> void:
