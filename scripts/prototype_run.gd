@@ -27,7 +27,9 @@ var bypass_drawing := false
 @onready var heading: Label = %Heading
 @onready var run_status: Label = %RunStatus
 @onready var message: Label = %Message
-@onready var choices: VBoxContainer = %Choices
+@onready var choices: BoxContainer = %Choices
+@onready var deck_panel: Control = %DeckList.get_parent()
+@onready var portal_backdrop: TextureRect = %PortalBackdrop
 @onready var deck_title: Label = %DeckTitle
 @onready var deck_list: RichTextLabel = %DeckList
 @onready var back_button: Button = %RunBackButton
@@ -65,6 +67,13 @@ func _render_panel(focus_choice := true) -> void:
 	for choice in choices.get_children():
 		choices.remove_child(choice)
 		choice.queue_free()
+	var portal_stage := _local_run.stage == CoopRunState.PORTAL if local_coop else _run.stage == RunState.Stage.PORTAL
+	portal_backdrop.visible = portal_stage
+	deck_panel.visible = not portal_stage
+	$RunPanel/Layout/Title.visible = not portal_stage
+	choices.vertical = not portal_stage
+	choices.alignment = BoxContainer.ALIGNMENT_CENTER if portal_stage else BoxContainer.ALIGNMENT_BEGIN
+	choices.size_flags_vertical = Control.SIZE_EXPAND_FILL if portal_stage else Control.SIZE_FILL
 	if local_coop:
 		_render_local_panel()
 	else:
@@ -143,8 +152,9 @@ func _render_local_panel() -> void:
 		_render_local_arcana()
 		return
 	run_status.text = _encounter_title(_local_run.encounter_id, _local_run.active_encounter)
+	var stats_separator := "  ·  " if _local_run.stage == CoopRunState.PORTAL else "\n"
 	for mage in _local_run.active_combat.players.values():
-		run_status.text += "\n%s  ·  HP %d/%d" % [mage.id, mage.hp, mage.max_hp]
+		run_status.text += stats_separator + "%s  ·  HP %d/%d" % [mage.id, mage.hp, mage.max_hp]
 	match _local_run.stage:
 		CoopRunState.REWARD:
 			var player := LOCAL_MAGES[_local_choice_index]
@@ -170,7 +180,7 @@ func _render_local_panel() -> void:
 			var view := _local_run.view_fields(player)
 			heading.text = "Choose a Portal  ·  %d/%d decisions submitted" % [view.portal_ready, LOCAL_MAGES.size()]
 			message.text = "%s: select a portal. One Mage's choice is drawn after everyone submits." % player
-			_add_portal_choices(view.portal_options, _submit_local_portal.bind(player, _local_run.encounter_id))
+			_add_portal_choices(view.portal_options, _submit_local_portal.bind(player, _local_run.encounter_id), view.portal_votes)
 		CoopRunState.VICTORY:
 			heading.text = "Run Victory"
 			message.text = "Your party defeated %s and completed the prototype run." % _local_run.active_encounter.enemy_name
@@ -198,9 +208,10 @@ func _add_arcana_choices(options: Array, submit: Callable) -> void:
 	_add_choice("Skip Arcana", submit.bind(&""))
 
 
-func _add_portal_choices(options: Array, submit: Callable) -> void:
+func _add_portal_choices(options: Array, submit: Callable, votes: Dictionary = {}) -> void:
 	for option: Dictionary in options:
 		var button := PortalChoiceButton.make(option)
+		PortalChoiceButton.show_votes(button, votes)
 		button.pressed.connect(submit.bind(StringName(option.id)))
 		choices.add_child(button)
 
@@ -349,6 +360,7 @@ func _show_local_combat() -> void:
 
 func _show_combat(combat: CombatState, encounter: EncounterData, stage_title: String, index: int) -> void:
 	run_panel.hide()
+	portal_backdrop.hide()
 	_combat_view = COMBAT_SCENE.instantiate()
 	var run_title := "Prototype Run" if run_data.title.is_empty() else run_data.title
 	_combat_view.configure_run(combat, encounter, "%s  /  %s" % [run_title, stage_title])

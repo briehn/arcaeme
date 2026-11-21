@@ -5,6 +5,7 @@ const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
 const ViewSnapshot = preload("res://scripts/combat/combat_view_snapshot.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
+const Silhouette = preload("res://scripts/ui/encounter_silhouette.gd")
 const SpellDrawingSettings = preload("res://scripts/combat/spell_drawing_settings.gd")
 const SpellDrawingPanel = preload("res://scripts/ui/spell_drawing_panel.gd")
 const SPELL_DRAWING_PANEL = preload("res://scenes/spell_drawing_panel.tscn")
@@ -32,6 +33,8 @@ var bypass_drawing := false
 
 @onready var turn_label: Label = %TurnLabel
 @onready var player_label: Label = %PlayerLabel
+@onready var mage_silhouettes: HBoxContainer = %MageSilhouettes
+@onready var single_enemy: HBoxContainer = %SingleEnemy
 @onready var enemy_label: Label = %EnemyLabel
 @onready var enemy_picker: VBoxContainer = %EnemyPicker
 @onready var target_label: Label = %TargetLabel
@@ -61,6 +64,7 @@ var _input_allowed := false
 var _pending_card_copy := -1
 var _living_enemy_ids: Array[StringName] = []
 var _enemy_buttons: Dictionary[StringName, WrappedTextButton] = {}
+var _single_enemy_silhouette: Silhouette
 var _spell_panel: SpellDrawingPanel
 var _casting_copy := -1
 var _cast_opened_ms := 0
@@ -110,6 +114,11 @@ func clear_network_view() -> void:
 
 
 func _ready() -> void:
+	_single_enemy_silhouette = Silhouette.new()
+	_single_enemy_silhouette.custom_minimum_size = Vector2(72, 72)
+	_single_enemy_silhouette.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	single_enemy.add_child(_single_enemy_silhouette)
+	single_enemy.move_child(_single_enemy_silhouette, 0)
 	if _network_mode:
 		%TitleLabel.text = "Network Battle Mage Co-op Test"
 		%BackButton.hide()
@@ -160,8 +169,19 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 		_:
 			turn_label.text = "Turn %d  /  %s" % [snapshot["round"], "Shared player phase" if coop else "Your turn"]
 	var stats := PackedStringArray()
-	for party_member in party:
-		stats.append(_player_stats(party_member, coop, phase))
+	for index in party.size():
+		var party_member: Dictionary = party[index]
+		var details := _player_stats(party_member, coop, phase)
+		stats.append(details)
+		if index >= mage_silhouettes.get_child_count():
+			var portrait := Silhouette.new()
+			portrait.custom_minimum_size = Vector2(50, 50)
+			mage_silhouettes.add_child(portrait)
+		var portrait := mage_silhouettes.get_child(index) as Silhouette
+		portrait.show()
+		portrait.display("mage", party_member.hp > 0, party_member.id == snapshot.viewer, index + 1)
+	for unused in range(party.size(), mage_silhouettes.get_child_count()):
+		(mage_silhouettes.get_child(unused) as Control).hide()
 	player_label.text = "\n".join(stats)
 	_render_enemies(snapshot, in_combat, coop, pending_card_name)
 	cards_label.text = "Hand %d   ·   Draw pile %d   ·   Discard pile %d" % [
@@ -202,7 +222,11 @@ func _render_enemies(snapshot: Dictionary, in_combat: bool, coop: bool, pending_
 		if enemy.alive:
 			_living_enemy_ids.append(StringName(enemy.id))
 	enemy_picker.visible = enemies.size() > 1
-	enemy_label.visible = not enemy_picker.visible
+	single_enemy.visible = not enemy_picker.visible
+	enemy_label.visible = single_enemy.visible
+	# Give the party more space for status rows when only one enemy needs a lane.
+	(mage_silhouettes.get_parent() as Control).size_flags_stretch_ratio = 1.0 if enemy_picker.visible else 2.0
+	(single_enemy.get_parent() as Control).size_flags_stretch_ratio = 2.0 if enemy_picker.visible else 1.0
 	if enemy_label.visible:
 		_render_single_enemy(snapshot, in_combat, coop)
 		return
@@ -210,6 +234,7 @@ func _render_enemies(snapshot: Dictionary, in_combat: bool, coop: bool, pending_
 
 
 func _render_single_enemy(snapshot: Dictionary, in_combat: bool, coop: bool) -> void:
+	_single_enemy_silhouette.display(snapshot["enemy_name"], snapshot["enemy_hp"] > 0)
 	enemy_label.text = "%s   ·   HP %d/%d" % [
 		snapshot["enemy_name"], snapshot["enemy_hp"], snapshot["enemy_max_hp"]]
 	var enemy_block: int = snapshot.get("enemy_block", 0)
@@ -241,11 +266,26 @@ func _render_enemy_picker(enemies: Array, in_combat: bool, coop: bool, pending_c
 		var button: WrappedTextButton = _enemy_buttons.get(enemy_id)
 		if button == null:
 			button = WrappedTextButton.new()
-			button.custom_minimum_size = Vector2(250, 78)
+			button.custom_minimum_size = Vector2(172, 106)
 			button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			button.add_theme_font_size_override("font_size", 15)
 			button.pressed.connect(_on_enemy_selected.bind(enemy_id))
 			enemy_targets.add_child(button)
 			_enemy_buttons[enemy_id] = button
+			var portrait := Silhouette.new()
+			portrait.name = "Silhouette"
+			button.add_child(portrait)
+			portrait.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+			portrait.offset_left = -21
+			portrait.offset_right = 21
+			portrait.offset_top = 3
+			portrait.offset_bottom = 45
+			for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+				var style := button.get_theme_stylebox(state).duplicate() as StyleBox
+				style.content_margin_top = 46
+				button.add_theme_stylebox_override(state, style)
+		var silhouette := button.get_node("Silhouette") as Silhouette
+		silhouette.display(enemy.name, enemy.alive, choosing_target and enemy.alive and button.has_focus())
 		var details := "%s\nHP %d/%d   ·   Block %d" % [enemy_name, enemy.hp, enemy.max_hp, enemy.block]
 		details += _modifier_counters(enemy.strength, enemy.dexterity)
 		details += _status_counters(enemy.poison, enemy.burning)
@@ -255,6 +295,7 @@ func _render_enemy_picker(enemies: Array, in_combat: bool, coop: bool, pending_c
 			details += "\nIntent: " + _enemy_intent(enemy.intent, coop, enemy.attack_poison, enemy.attack_burning)
 		button.set_wrapped_text(details)
 		button.disabled = not choosing_target or not enemy.alive
+		button.add_theme_color_override("font_disabled_color", Color("#f1e9ff") if enemy.alive else Color("#c0b2cb"))
 		_highlight_target_choice(button, not button.disabled)
 		enemy_targets.move_child(button, index)
 

@@ -45,7 +45,8 @@ const SPELL_DRAWING = preload("res://resources/prototype/spell_drawing_settings.
 @onready var reward_panel: MarginContainer = %RewardPanel
 @onready var reward_status: Label = %RewardStatus
 @onready var reward_progress: Label = %RewardProgress
-@onready var reward_choices: VBoxContainer = %RewardChoices
+@onready var reward_choices: BoxContainer = %RewardChoices
+@onready var portal_backdrop: TextureRect = %PortalBackdrop
 @onready var skip_reward_button: Button = %SkipReward
 @onready var combat_slot: Control = %CombatSlot
 
@@ -112,6 +113,10 @@ func _refresh() -> void:
 
 func _refresh_session_view() -> void:
 	var stage: String = session.snapshot.get("run_stage", "")
+	portal_backdrop.visible = stage == CoopRunState.PORTAL
+	reward_choices.vertical = not portal_backdrop.visible
+	reward_choices.alignment = BoxContainer.ALIGNMENT_CENTER if portal_backdrop.visible else BoxContainer.ALIGNMENT_BEGIN
+	reward_choices.size_flags_vertical = Control.SIZE_EXPAND_FILL if portal_backdrop.visible else Control.SIZE_FILL
 	var configured_title: String = session.snapshot.get("run_title", "")
 	var stage_title := ""
 	match stage:
@@ -244,6 +249,7 @@ func _refresh_portals(opening_panel: bool) -> void:
 	var input_allowed := connected and not submitted and session.can_submit()
 	for button: Button in reward_choices.get_children():
 		button.disabled = not input_allowed
+		PortalChoiceButton.show_votes(button, session.snapshot.get("portal_votes", {}))
 	if opening_panel and input_allowed and reward_choices.get_child_count() > 0:
 		reward_choices.get_child(0).grab_focus()
 

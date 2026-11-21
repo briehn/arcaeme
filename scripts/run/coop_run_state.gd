@@ -190,10 +190,15 @@ func view_fields(player_id: StringName) -> Dictionary:
 		if _portal_route != null:
 			view["portal_after_reward"] = true
 	elif stage == PORTAL:
+		var votes := {}
+		for seat in _player_ids:
+			if _portal_choices.has(seat):
+				votes[String(seat)] = String(_portal_choices[seat])
 		view.merge({
 			"portal_options": _portal_route.options(active_encounter.enemy_id),
 			"portal_ready": _portal_choices.size(),
 			"portal_submitted": _portal_choices.has(player_id),
+			"portal_votes": votes,
 		})
 	return view
 

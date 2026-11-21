@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" uid="uid://ccivesrvmwy84" path="res://scripts/combat.gd" id="1_764e3"]
 [ext_resource type="Resource" path="res://resources/prototype/battle_mage_encounter.tres" id="2_encounter"]
+[ext_resource type="Texture2D" path="res://resources/prototype/encounter_backdrop.tres" id="3_backdrop"]
 
 [node name="Combat" type="Control" unique_id=755346703]
 layout_mode = 3
@@ -12,6 +13,17 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_764e3")
 encounter = ExtResource("2_encounter")
+
+[node name="EncounterBackdrop" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("3_backdrop")
+expand_mode = 1
 
 [node name="MarginContainer" type="MarginContainer" parent="." unique_id=2014835882]
 layout_mode = 1
@@ -55,41 +67,58 @@ theme_override_colors/font_color = Color(0.98, 0.84, 0.56, 1)
 theme_override_font_sizes/font_size = 23
 autowrap_mode = 3
 
-[node name="PlayerLabel" type="Label" parent="MarginContainer/VBoxContainer/CombatScroll/Content" unique_id=888059168]
+[node name="Battlefield" type="HBoxContainer" parent="MarginContainer/VBoxContainer/CombatScroll/Content"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_font_sizes/font_size = 20
-autowrap_mode = 3
+theme_override_constants/separation = 18
 
-[node name="EnemyLabel" type="Label" parent="MarginContainer/VBoxContainer/CombatScroll/Content" unique_id=1216847030]
+[node name="Party" type="VBoxContainer" parent="MarginContainer/VBoxContainer/CombatScroll/Content/Battlefield"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="MageSilhouettes" type="HBoxContainer" parent="MarginContainer/VBoxContainer/CombatScroll/Content/Battlefield/Party"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_font_sizes/font_size = 20
+theme_override_constants/separation = 8
+
+[node name="PlayerLabel" type="Label" parent="MarginContainer/VBoxContainer/CombatScroll/Content/Battlefield/Party" unique_id=888059168]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
 autowrap_mode = 3
 
-[node name="EnemyPicker" type="VBoxContainer" parent="MarginContainer/VBoxContainer/CombatScroll/Content"]
+[node name="Opposition" type="VBoxContainer" parent="MarginContainer/VBoxContainer/CombatScroll/Content/Battlefield"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 2.0
+
+[node name="SingleEnemy" type="HBoxContainer" parent="MarginContainer/VBoxContainer/CombatScroll/Content/Battlefield/Opposition"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="EnemyLabel" type="Label" parent="MarginContainer/VBoxContainer/CombatScroll/Content/Battlefield/Opposition/SingleEnemy" unique_id=1216847030]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+autowrap_mode = 3
+
+[node name="EnemyPicker" type="VBoxContainer" parent="MarginContainer/VBoxContainer/CombatScroll/Content/Battlefield/Opposition"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 
-[node name="TargetLabel" type="Label" parent="MarginContainer/VBoxContainer/CombatScroll/Content/EnemyPicker"]
+[node name="TargetLabel" type="Label" parent="MarginContainer/VBoxContainer/CombatScroll/Content/Battlefield/Opposition/EnemyPicker"]
 unique_name_in_owner = true
 layout_mode = 2
 autowrap_mode = 3
 
-[node name="EnemyTargets" type="HFlowContainer" parent="MarginContainer/VBoxContainer/CombatScroll/Content/EnemyPicker"]
+[node name="EnemyTargets" type="HFlowContainer" parent="MarginContainer/VBoxContainer/CombatScroll/Content/Battlefield/Opposition/EnemyPicker"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/h_separation = 8
 theme_override_constants/v_separation = 8
-
-[node name="CombatLog" type="RichTextLabel" parent="MarginContainer/VBoxContainer/CombatScroll/Content"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 80)
-layout_mode = 2
-size_flags_vertical = 3
-scroll_following = true
-selection_enabled = true
 
 [node name="Separator" type="HSeparator" parent="MarginContainer/VBoxContainer/CombatScroll/Content"]
 layout_mode = 2
@@ -123,6 +152,14 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/h_separation = 9
 theme_override_constants/v_separation = 9
+
+[node name="CombatLog" type="RichTextLabel" parent="MarginContainer/VBoxContainer/CombatScroll/Content"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 80)
+layout_mode = 2
+size_flags_vertical = 3
+scroll_following = true
+selection_enabled = true
 
 [node name="Actions" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2

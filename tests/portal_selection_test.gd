@@ -191,7 +191,7 @@ func _test_authority(size: int) -> void:
 		var ally := authority.snapshot_for(2)
 		_check(combat.encounter_id == encounter_id and combat.arcana.id == arcana
 			and not ally.has("arcana") and combat.players == ally.players and combat.enemies == ally.enemies
-			and not combat.players[0].has("hand") and not combat.has("portal_options"),
+			and not combat.players[0].has("hand") and not combat.has("portal_options") and not combat.has("portal_votes"),
 			"playthrough carries private Arcana and publishes a common combat state")
 		if encounter_id > 1:
 			_check(ally.players[1].hp == 9, "a recovered teammate's HP carries across portals")
@@ -220,7 +220,7 @@ func _test_authority(size: int) -> void:
 		var options: Array = gate.portal_options
 		_check(gate.run_stage == "portal" and gate.encounter_id == encounter_id and gate.portal_ready == 0
 			and options == authority.snapshot_for(2).portal_options
-			and not gate.has("reward_options") and gate.run_deck_count == data.starting_deck.size() + 1
+			and gate.portal_votes.is_empty() and not gate.has("reward_options") and gate.run_deck_count == data.starting_deck.size() + 1
 			and authority.snapshot_for(2).run_deck_count == data.starting_deck.size(),
 			"the party opens a shared portal gate after individual reward decisions")
 		var first: Dictionary = options[0]
@@ -235,8 +235,11 @@ func _test_authority(size: int) -> void:
 		_send(authority, 2, Authority.Command.PORTAL, {"portal_id": "unoffered"}, Authority.Result.ILLEGAL_ACTION)
 		_send(authority, 1, Authority.Command.PORTAL, {"portal_id": first.id})
 		var submitted := authority.snapshot_for(1)
+		var waiting := authority.snapshot_for(2)
 		_check(submitted.portal_submitted and submitted.portal_ready == 1 and submitted.encounter_id == encounter_id
-			and not authority.snapshot_for(2).portal_submitted, "the host waits for the other seats and scopes submission status")
+			and not waiting.portal_submitted, "the host waits for the other seats and scopes submission status")
+		_check(submitted.portal_votes == {submitted.viewer: first.id} and waiting.portal_votes == submitted.portal_votes,
+			"the shared vote display maps a Mage only to their submitted opaque portal token")
 		_send(authority, 1, Authority.Command.PORTAL, {"portal_id": first.id}, Authority.Result.DUPLICATE, true)
 		_send(authority, 1, Authority.Command.PORTAL, {"portal_id": last.id}, Authority.Result.ILLEGAL_ACTION)
 		var entries: Array[StringName] = [StringName(first.id)]

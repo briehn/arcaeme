@@ -5,6 +5,7 @@
 [ext_resource type="Resource" path="res://resources/prototype/local_coop_encounter.tres" id="3_encounter"]
 [ext_resource type="Script" path="res://scripts/ui/enemy_playtest_selector.gd" id="4_enemy_selector"]
 [ext_resource type="Script" path="res://scripts/ui/pacing_variant_picker.gd" id="5_pacing_picker"]
+[ext_resource type="Texture2D" path="res://resources/prototype/encounter_backdrop.tres" id="6_backdrop"]
 
 [node name="NetworkCoop" type="Control"]
 layout_mode = 3
@@ -19,6 +20,17 @@ script = ExtResource("1_view")
 script = ExtResource("2_session")
 encounter = ExtResource("3_encounter")
 player_ids = Array[StringName]([&"Battle Mage 1", &"Battle Mage 2", &"Battle Mage 3", &"Battle Mage 4"])
+
+[node name="PortalBackdrop" type="TextureRect" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = ExtResource("6_backdrop")
+expand_mode = 1
 
 [node name="Layout" type="VBoxContainer" parent="."]
 layout_mode = 1
@@ -230,11 +242,12 @@ size_flags_vertical = 3
 follow_focus = true
 horizontal_scroll_mode = 0
 
-[node name="RewardChoices" type="VBoxContainer" parent="Layout/RewardPanel/RewardLayout/RewardScroll"]
+[node name="RewardChoices" type="BoxContainer" parent="Layout/RewardPanel/RewardLayout/RewardScroll"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
+vertical = true
 
 [node name="SkipReward" type="Button" parent="Layout/RewardPanel/RewardLayout"]
 unique_name_in_owner = true
