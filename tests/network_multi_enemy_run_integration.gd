@@ -295,10 +295,13 @@ func _verify_reward(view: Dictionary, living: int) -> bool:
 		return false
 	if not _with_portals and view.next_encounter_name != NAMES[encounter]:
 		return false
-	var progress: Label = current_scene.get_node("%RewardProgress")
-	var choices := current_scene.get_node("%RewardChoices")
+	var overlay := _reward()
+	var progress: Label = overlay.get_node("%RewardStatus")
+	var choices := overlay.get_node("%RewardChoices")
 	if ("%d/%d" % [view.reward_ready, _size] not in progress.text
-			or choices.get_child_count() != view.reward_options.size()):
+			or choices.get_child_count() != view.reward_options.size()
+			or not overlay.is_visible_in_tree() or not (_combat() as Control).is_visible_in_tree()
+			or not (_combat().get_node("%EndTurnButton") as Button).disabled):
 		return false
 	if encounter not in _rewards_seen:
 		if view.reward_ready != 0:
@@ -308,7 +311,7 @@ func _verify_reward(view: Dictionary, living: int) -> bool:
 		for player in view.players:
 			_carry_hp.append(player.hp)
 	if view.reward_submitted:
-		return view.reward_options.is_empty()
+		return view.reward_options.is_empty() and not overlay.get_node("%SkipReward").visible
 	var reward_ids := PackedStringArray()
 	for index in view.reward_options.size():
 		var card: Dictionary = view.reward_options[index]
@@ -334,29 +337,31 @@ func _verify_portal(view: Dictionary, living: int) -> bool:
 			or view.portal_ready != _portal_ready_seen.get(view.encounter_id, 0)
 			or view.portal_options != _portal_route.options(_portal_source)
 			or view.portal_options.size() != (1 if view.encounter_id == 3 else 2)
-			or (current_scene.get_node("%CombatSlot") as Control).visible):
+			or not (_combat() as Control).is_visible_in_tree()):
 		return false
 	_portal_options = view.portal_options
 	_portal_ready_seen[view.encounter_id] = view.portal_ready + 1
 	var heading: Label = current_scene.get_node("%RunStage")
-	var progress: Label = current_scene.get_node("%RewardProgress")
-	var choices := current_scene.get_node("%RewardChoices")
+	var progress: Label = _combat().get_node("%PortalStatus")
+	var choices := _combat().get_node("%PortalChoices") as Control
 	if ("Choose a Portal" not in heading.text or "%d/%d" % [view.portal_ready, _size] not in progress.text
-			or (current_scene.get_node("%SkipReward") as Button).visible):
-		return false
-	if view.portal_submitted:
-		return true
-	if choices.get_child_count() != view.portal_options.size():
+			or _reward().visible or not choices.is_visible_in_tree()
+			or _reward().get_node("%RewardChoices").get_child_count() != 0
+			or choices.get_child_count() != view.portal_options.size()):
 		return false
 	for index in view.portal_options.size():
 		var portal: Dictionary = view.portal_options[index]
 		var button: Button = choices.get_child(index)
 		if (button.get_meta("portal_id", "") != portal.id or portal.type not in button.text
 				or not button.tooltip_text.is_empty() or portal.size() != 3
-				or not String(portal.id).is_valid_hex_number()):
+				or not String(portal.id).is_valid_hex_number() or (view.portal_submitted and not button.disabled)):
 			return false
 		for branch in portal.branches:
 			if branch.size() != 1 or branch.type not in button.text:
+				return false
+		var vote_label := button.get_node("PortalVoters") as Label
+		for mage: String in view.portal_votes:
+			if (mage in vote_label.text) != (view.portal_votes[mage] == portal.id):
 				return false
 	return true
 
@@ -469,10 +474,10 @@ func _drive_reward(view: Dictionary) -> void:
 	if view.encounter_id == _seat:
 		var option := _seat - 1
 		_deck.append(view.reward_options[option].id)
-		var choices := current_scene.get_node("%RewardChoices")
+		var choices := _reward().get_node("%RewardChoices")
 		(choices.get_child(option) as Button).pressed.emit()
 	else:
-		(current_scene.get_node("%SkipReward") as Button).pressed.emit()
+		(_reward().get_node("%SkipReward") as Button).pressed.emit()
 
 
 func _drive_expanded_reward(view: Dictionary) -> void:
@@ -488,7 +493,7 @@ func _drive_expanded_reward(view: Dictionary) -> void:
 					return
 		return
 	if _seat == _size and view.encounter_id == 2:
-		(current_scene.get_node("%SkipReward") as Button).pressed.emit()
+		(_reward().get_node("%SkipReward") as Button).pressed.emit()
 		return
 	var option := 0
 	for index in view.reward_options.size():
@@ -497,7 +502,7 @@ func _drive_expanded_reward(view: Dictionary) -> void:
 			_new_card_takes += 1
 			break
 	_deck.append(view.reward_options[option].id)
-	(current_scene.get_node("%RewardChoices").get_child(option) as Button).pressed.emit()
+	(_reward().get_node("%RewardChoices").get_child(option) as Button).pressed.emit()
 
 
 func _drive_portal(view: Dictionary) -> void:
@@ -517,11 +522,11 @@ func _drive_portal(view: Dictionary) -> void:
 			{"encounter_id": 1, "portal_id": _portal_options[0].id})
 		return
 	var chosen := _portal_choice_for(_seat)
-	for button: Button in current_scene.get_node("%RewardChoices").get_children():
+	for button: Button in _combat().get_node("%PortalChoices").get_children():
 		if button.get_meta("portal_id", "") == chosen.id:
 			button.pressed.emit()
 			return
-	_fail("No menu action matched the scheduled portal vote.")
+	_fail("No physical portal matched the scheduled vote.")
 
 
 func _is_active_seat(view: Dictionary) -> bool:
@@ -649,6 +654,10 @@ func _copies(view: Dictionary) -> Array[int]:
 func _combat() -> Node:
 	return current_scene.get_node("%CombatSlot/Combat")
 
+func _reward() -> Control:
+	return _combat().get("reward_overlay") as Control
+
+
 
 func _report(view: Dictionary) -> void:
 	var stage_label: Label = current_scene.get_node("%RunStage")
@@ -663,6 +672,7 @@ func _report(view: Dictionary) -> void:
 		_fail("The run ended without exercising the expanded private rewards and authority checks.")
 		return
 	if (view.run_stage != "victory" or "Run Victory" not in stage_label.text
+			or _reward().visible or (_combat().get_node("%PortalChoices") as Control).is_visible_in_tree()
 			or _started != stages or _rewards_seen != rewards
 			or _partial_seen != [1, 2] or (_seat == 2 and (not _probed_target or not _probed_old_reward))
 			or (_with_arcana and (_arcana_ready_seen.size() != _size

@@ -198,19 +198,21 @@ func _test_solo_portal_run() -> void:
 	await _submit_guide(opening)
 	_check(state.phase == CombatState.Phase.VICTORY and state.players[SOLO].mana == 0,
 		"drawn attacks can win the opening combat")
-	await _press(opening.end_turn_button)
-	_check(run._run.stage == RunState.Stage.REWARD and run._combat_view == null,
-		"continue closes the old drawing view and enters the normal reward screen")
+	_check(run._run.stage == RunState.Stage.REWARD and run._combat_view == opening
+		and _reward(opening).visible and not _panel(opening).visible,
+		"victory automatically opens rewards over the same battlefield after closing the cast")
 	var opening_counts: Dictionary = run._casting_pacing.encounters[1]
 	_check(opening_counts.prompts == 5 and opening_counts.successful == 3 and opening_counts.excellent == 3
-		and opening_counts.canceled == 1 and opening_counts.drawing_ms >= 0 and opening_counts.casts_by_seat[1] == 3
-		and "Encounter 1" in run.heading.tooltip_text, "opening metrics count resolved, invalid and canceled prompts once")
+		and opening_counts.canceled == 1 and opening_counts.drawing_ms >= 0 and opening_counts.casts_by_seat[1] == 3,
+		"opening metrics count resolved, invalid and canceled prompts once")
 	_check(run._run.reward_options() == fixture.reward_offers(RunData.BATTLE_MAGE, 1, 0)
 		and state.submit_spell_cast(SOLO, STRIKE.rune_template.strokes, Time.get_ticks_msec()) == CombatState.CastResult.NO_CAST,
 		"expanded reward offers stay seeded and the old combat cannot resolve stale ink")
-	await _press(_choice(run, "Astral Salvo"))
-	_check(run._run.stage == RunState.Stage.PORTAL and run._run.deck_cards() == fixture.starting_deck + [ASTRA],
-		"the normal expanded reward flow adds Salvo to the run deck")
+	await _press(_reward_choice(opening, "Astral Salvo"))
+	_check(run._run.stage == RunState.Stage.PORTAL and run._run.deck_cards() == fixture.starting_deck + [ASTRA]
+		and run._combat_view == opening and not _reward(opening).visible
+		and _reward(opening).get_node("%RewardChoices").get_child_count() == 0,
+		"the reward adds Salvo and clears private controls before showing portals on the same battlefield")
 	var route := PortalRoute.new(fixture.run_seed)
 	var seed_rng := RandomNumberGenerator.new()
 	seed_rng.seed = fixture.run_seed
@@ -221,7 +223,7 @@ func _test_solo_portal_run() -> void:
 		var portal: Dictionary = run._run.portal_options()[0]
 		var expected := route.destination(first_source, StringName(portal.id))
 		var carried_hp := run._run.current_hp
-		await _press(run.choices.get_child(0) as Button)
+		await _press(run._combat_view.get_node("%PortalChoices").get_child(0) as Button)
 		var view := run._combat_view
 		var active := view._state
 		_check(run._run.encounter_id == index and run._run.active_encounter.enemy_id == expected.enemy_id
@@ -240,9 +242,8 @@ func _test_solo_portal_run() -> void:
 		await _win_remaining(view)
 		_check(active.phase == CombatState.Phase.VICTORY, "drawn cards clear portal encounter %d" % index)
 		first_source = expected.enemy_id
-		await _press(view.end_turn_button)
 		if index < 4:
-			await _press(_choice(run, "Skip Reward"))
+			await _press(_reward(view).get_node("%SkipReward") as Button)
 	_check(cast_drafted_salvo, "an acquired Salvo draws and resolves both scaled hits once in a later encounter")
 	_check(run._run.stage == RunState.Stage.VICTORY and run.heading.text == "Run Victory"
 		and run._combat_view == null and run._run.active_combat == null,
@@ -296,22 +297,27 @@ func _test_local_run() -> void:
 		"the owner's eligible cast spends the charge once")
 	await _select_attack(view, STRIKE, state.enemies[0].id)
 	await _submit_guide(view)
-	await _press(view.end_turn_button)
-	_check(run._local_run.stage == CoopRunState.REWARD and not run.deck_list.visible
-		and _choice(run, "Show Battle Mage 1 Reward") != null,
+	var overlay := _reward(view)
+	var reveal := overlay.get_node("%RevealReward") as Button
+	var deck_list := overlay.get_node("%DeckList") as Control
+	_check(run._local_run.stage == CoopRunState.REWARD and run._combat_view == view
+		and not deck_list.is_visible_in_tree() and reveal.visible and FIRST in reveal.text,
 		"the local victory starts with a private reward handoff")
 	var totals: Dictionary = run._casting_pacing.totals
 	_check(totals.prompts == 4 and totals.successful == 3 and totals.canceled == 1
 		and totals.casts_by_seat[1] == 2 and totals.casts_by_seat[2] == 1,
 		"pacing counts each local Mage's completed casts separately")
-	await _press(_choice(run, "Show Battle Mage 1 Reward"))
-	_check(run.deck_list.visible and _choice(run, "Astral Salvo") != null,
+	await _press(reveal)
+	(overlay.get_node("%DeckToggle") as Button).button_pressed = true
+	await _settle()
+	_check(deck_list.is_visible_in_tree() and _reward_choice(view, "Astral Salvo") != null,
 		"Mage 1 alone sees the seeded expanded reward and personal deck")
-	await _press(_choice(run, "Astral Salvo"))
-	_check(not run.deck_list.visible and _choice(run, "Show Battle Mage 2 Reward") != null,
+	await _press(_reward_choice(view, "Astral Salvo"))
+	_check(not deck_list.is_visible_in_tree() and reveal.visible and SECOND in reveal.text
+		and overlay.get_node("%RewardChoices").get_child_count() == 0,
 		"Mage 2's handoff hides the previous seat's deck")
-	await _press(_choice(run, "Show Battle Mage 2 Reward"))
-	await _press(_choice(run, "Skip Reward"))
+	await _press(reveal)
+	await _press(overlay.get_node("%SkipReward") as Button)
 	var next := run._combat_view
 	var next_state := next._state
 	_check(run._local_run.encounter_id == 2 and ASTRA in run._local_run.deck_cards(FIRST)
@@ -340,7 +346,7 @@ func _test_local_run() -> void:
 		await _press(next_selector.get_child(1) as Button)
 		await _press(next.end_turn_button)
 	_check(next_state.phase == CombatState.Phase.DEFEAT, "the shared enemy phase can defeat the opted-in party")
-	await _press(next.end_turn_button)
+	await _settle()
 	_check(run._local_run.stage == CoopRunState.DEFEAT and run.heading.text == "Run Defeat"
 		and run._combat_view == null and next_state.submit_spell_cast(FIRST, STRIKE.rune_template.strokes,
 			Time.get_ticks_msec()) == CombatState.CastResult.NO_CAST,
@@ -371,11 +377,12 @@ func _test_local_victory() -> void:
 				and state.action_history.back().spell_power_percent == 110,
 				"the newly assigned multi-hit rune resolves for its own seat in fight %d" % encounter_id)
 		_check(state.phase == CombatState.Phase.VICTORY, "drawn attacks clear local fight %d" % encounter_id)
-		await _press(view.end_turn_button)
 		if encounter_id < fixture.encounter_count():
 			for mage in [FIRST, SECOND]:
-				await _press(_choice(run, "Show %s Reward" % mage))
-				await _press(_choice(run, "Skip Reward"))
+				var reveal := _reward(view).get_node("%RevealReward") as Button
+				_check(mage in reveal.text, "the correct Mage privately receives the reward handoff")
+				await _press(reveal)
+				await _press(_reward(view).get_node("%SkipReward") as Button)
 	_check(run._local_run.stage == CoopRunState.VICTORY and run.heading.text == "Run Victory"
 		and run._combat_view == null and run._casting_pacing.encounters.size() == 3
 		and run._casting_pacing.totals.casts_by_seat == {1: 3, 2: 2},
@@ -514,6 +521,17 @@ func _card_button(view: CombatView, card: CardData) -> Button:
 
 func _choice(run: PrototypeRunView, title: String) -> Button:
 	for choice: Button in run.choices.get_children():
+		if choice.text.begins_with(title):
+			return choice
+	return null
+
+
+func _reward(view: CombatView) -> Control:
+	return view.get("reward_overlay") as Control
+
+
+func _reward_choice(view: CombatView, title: String) -> Button:
+	for choice: Button in _reward(view).get_node("%RewardChoices").get_children():
 		if choice.text.begins_with(title):
 			return choice
 	return null

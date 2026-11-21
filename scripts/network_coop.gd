@@ -9,7 +9,6 @@ const BattleMagePoolPlaytest = preload("res://scripts/run/battle_mage_pool_playt
 const EnemyPlaytestSelector = preload("res://scripts/ui/enemy_playtest_selector.gd")
 const PacingExperiment = preload("res://scripts/run/pacing_experiment.gd")
 const PacingVariantPicker = preload("res://scripts/ui/pacing_variant_picker.gd")
-const PortalChoiceButton = preload("res://scripts/ui/portal_choice_button.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 const STATUS_ENCOUNTER = preload("res://resources/prototype/status_playtest/encounter.tres")
 const MODIFIER_ENCOUNTER = preload("res://resources/prototype/modifier_playtest/encounter.tres")
@@ -46,7 +45,6 @@ const SPELL_DRAWING = preload("res://resources/prototype/spell_drawing_settings.
 @onready var reward_status: Label = %RewardStatus
 @onready var reward_progress: Label = %RewardProgress
 @onready var reward_choices: BoxContainer = %RewardChoices
-@onready var portal_backdrop: TextureRect = %PortalBackdrop
 @onready var skip_reward_button: Button = %SkipReward
 @onready var combat_slot: Control = %CombatSlot
 
@@ -113,10 +111,6 @@ func _refresh() -> void:
 
 func _refresh_session_view() -> void:
 	var stage: String = session.snapshot.get("run_stage", "")
-	portal_backdrop.visible = stage == CoopRunState.PORTAL
-	reward_choices.vertical = not portal_backdrop.visible
-	reward_choices.alignment = BoxContainer.ALIGNMENT_CENTER if portal_backdrop.visible else BoxContainer.ALIGNMENT_BEGIN
-	reward_choices.size_flags_vertical = Control.SIZE_EXPAND_FILL if portal_backdrop.visible else Control.SIZE_FILL
 	var configured_title: String = session.snapshot.get("run_title", "")
 	var stage_title := ""
 	match stage:
@@ -150,18 +144,14 @@ func _refresh_session_view() -> void:
 		else:
 			stage_title = encounter_title
 	run_stage_label.text = "%s  /  %s" % [run_title, stage_title]
-	if stage in [CoopRunState.REWARD, CoopRunState.ARCANA, CoopRunState.PORTAL]:
+	if stage == CoopRunState.ARCANA:
 		_combat.clear_network_cast()
+		_combat.clear_encounter_intermission()
 		combat_slot.hide()
-		var opening_panel := stage != _choice_stage
-		if opening_panel:
-			_clear_reward_choices()
+		var opening_panel := _choice_stage != stage
 		_choice_stage = stage
 		reward_panel.show()
-		if stage == CoopRunState.PORTAL:
-			_refresh_portals(opening_panel)
-		else:
-			_refresh_choices(stage == CoopRunState.ARCANA, opening_panel)
+		_refresh_arcana(opening_panel)
 		return
 	_choice_stage = ""
 	if reward_panel.visible:
@@ -170,56 +160,44 @@ func _refresh_session_view() -> void:
 	if session.snapshot.is_empty():
 		_combat.clear_network_view()
 		combat_slot.hide()
-	else:
-		var run_finished := stage == CoopRunState.VICTORY or stage == CoopRunState.DEFEAT
-		_combat.display_network_snapshot(session.snapshot, session.can_submit() and not run_finished,
-			session.status == NetworkSession.Status.ACTIVE and not run_finished)
-		combat_slot.show()
-
-
-func _refresh_choices(selecting_arcana: bool, opening_panel: bool) -> void:
-	var prefix := "arcana" if selecting_arcana else "reward"
-	var category := "Arcana" if selecting_arcana else "reward"
-	reward_progress.text = "%d/%d %s decisions submitted" % [
-		session.snapshot[prefix + "_ready"], session.party_size, category]
+		return
 	var connected := session.status == NetworkSession.Status.ACTIVE
-	var submitted: bool = session.snapshot[prefix + "_submitted"]
-	var choosing := connected and not submitted
-	if not connected:
-		reward_status.text = "The session ended."
-	elif selecting_arcana:
-		reward_status.text = ("Arcana decision submitted. The run begins after everyone's decision." if submitted
-			else "Choose one provisional Major Arcana for this run, or skip.")
-	elif submitted:
-		var configured_title: String = session.snapshot.get("run_title", "")
-		var next_encounter := "boss" if configured_title.is_empty() else "final encounter"
-		reward_status.text = "Reward decision submitted. The %s begins when everyone is ready." % next_encounter
-	else:
-		reward_status.text = "Choose one provisional Battle Mage card for your run deck, or skip."
-	if connected and not selecting_arcana and session.snapshot.get("encounter_count", 0) > 2:
-		reward_status.text = ("Reward decision submitted." if submitted
-			else "Choose one provisional Battle Mage card for your run deck, or skip.")
-		if session.snapshot.get("portal_after_reward", false):
-			reward_status.text += " The portals open after everyone's reward decision."
+	var between_encounters := stage in [CoopRunState.REWARD, CoopRunState.PORTAL]
+	var run_finished := stage in [CoopRunState.VICTORY, CoopRunState.DEFEAT]
+	combat_slot.show()
+	if not between_encounters:
+		_combat.clear_encounter_intermission()
+	_combat.display_network_snapshot(session.snapshot, session.can_submit() and not between_encounters and not run_finished,
+		connected and not between_encounters and not run_finished)
+	if stage == CoopRunState.REWARD:
+		if connected:
+			_refresh_encounter_reward()
 		else:
-			reward_status.text += " Next: %s, after everyone's decision." % session.snapshot["next_encounter_name"]
-	var arcana: Dictionary = session.snapshot.get("arcana", {})
-	if not arcana.is_empty():
-		reward_status.text += "\nMajor Arcana: " + String(arcana.name)
-	skip_reward_button.text = "Skip Arcana" if selecting_arcana else "Skip Reward"
+			_combat.clear_encounter_intermission()
+	elif stage == CoopRunState.PORTAL:
+		_refresh_encounter_portals(connected)
+
+
+func _refresh_arcana(opening_panel: bool) -> void:
+	var view := session.snapshot
+	reward_progress.text = "%d/%d Arcana decisions submitted" % [view.arcana_ready, session.party_size]
+	var connected := session.status == NetworkSession.Status.ACTIVE
+	var choosing: bool = connected and not view.arcana_submitted
+	reward_status.text = "The session ended." if not connected else (
+		"Choose one provisional Major Arcana for this run, or skip." if choosing
+		else "Arcana decision submitted. The run begins after everyone's decision.")
+	skip_reward_button.text = "Skip Arcana"
 	skip_reward_button.visible = choosing
 	if not choosing:
 		_clear_reward_choices()
 		return
 	if reward_choices.get_child_count() == 0:
-		var submit: Callable = session.submit_arcana if selecting_arcana else session.submit_reward
-		for card: Dictionary in session.snapshot[prefix + "_options"]:
+		for card: Dictionary in view.arcana_options:
 			var button := WrappedTextButton.new()
-			button.text = ("%s\n%s" % [card.name, card.description] if selecting_arcana
-				else "%s  ·  %d Mana\n%s" % [card.name, card.cost, card.description])
+			button.text = "%s\n%s" % [card.name, card.description]
 			button.custom_minimum_size.y = 56
 			button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			button.pressed.connect(submit.bind(String(card.id)))
+			button.pressed.connect(session.submit_arcana.bind(String(card.id)))
 			reward_choices.add_child(button)
 	var input_allowed := session.can_submit()
 	for button: Button in reward_choices.get_children():
@@ -230,28 +208,33 @@ func _refresh_choices(selecting_arcana: bool, opening_panel: bool) -> void:
 		focus_target.grab_focus()
 
 
-func _refresh_portals(opening_panel: bool) -> void:
-	reward_progress.text = "%d/%d portal choices submitted" % [session.snapshot.portal_ready, session.party_size]
-	skip_reward_button.hide()
-	var connected := session.status == NetworkSession.Status.ACTIVE
-	var submitted: bool = session.snapshot.portal_submitted
+func _refresh_encounter_reward() -> void:
+	var view := session.snapshot
+	var status := "Reward decision submitted. Waiting for the other Mages." if view.reward_submitted \
+		else "Choose a card for your run deck, or skip."
+	if view.get("portal_after_reward", false):
+		status += " Portals open after everyone decides."
+	elif view.has("next_encounter_name"):
+		status += " Next: %s." % view.next_encounter_name
+	status += "\n%d/%d decisions submitted" % [view.reward_ready, session.party_size]
+	if not view.get("arcana", {}).is_empty():
+		status += "\nMajor Arcana: " + String(view.arcana.name)
+	var submit := Callable() if view.reward_submitted else Callable(session, "submit_reward")
+	_combat.open_reward_overlay().show_rewards("Victory · Card reward", status,
+		view.reward_options, submit, not view.reward_submitted and session.can_submit())
+
+
+func _refresh_encounter_portals(connected: bool) -> void:
+	var view := session.snapshot
+	var status := "Choose a portal"
 	if not connected:
-		reward_status.text = "The session ended."
-	elif submitted:
-		reward_status.text = "Choice submitted. Waiting for the other Mages."
-	else:
-		reward_status.text = "Choose a portal here. Each preview shows one step ahead. One Mage's choice is drawn after everyone submits."
-	if reward_choices.get_child_count() == 0:
-		for option: Dictionary in session.snapshot.portal_options:
-			var button := PortalChoiceButton.make(option)
-			button.pressed.connect(session.submit_portal.bind(String(option.id)))
-			reward_choices.add_child(button)
-	var input_allowed := connected and not submitted and session.can_submit()
-	for button: Button in reward_choices.get_children():
-		button.disabled = not input_allowed
-		PortalChoiceButton.show_votes(button, session.snapshot.get("portal_votes", {}))
-	if opening_panel and input_allowed and reward_choices.get_child_count() > 0:
-		reward_choices.get_child(0).grab_focus()
+		status = "The session ended."
+	elif view.portal_submitted:
+		status = "Choice submitted. Waiting for the other Mages."
+	status += "\n%d/%d portal choices submitted" % [view.portal_ready, session.party_size]
+	_combat.show_encounter_portals(view.portal_options, view.get("portal_votes", {}), status,
+		session.submit_portal, connected and not view.portal_submitted and session.can_submit())
+
 
 
 func _clear_reward_choices() -> void:
@@ -408,10 +391,7 @@ func _on_join_pressed() -> void:
 
 
 func _on_skip_reward_pressed() -> void:
-	if session.snapshot.get("run_stage") == CoopRunState.ARCANA:
-		session.submit_arcana("")
-	else:
-		session.submit_reward("")
+	session.submit_arcana("")
 
 
 func _on_leave_pressed() -> void:

@@ -184,19 +184,35 @@ func _play_short_run(mode: RuneCanvas.DrawingMode) -> void:
 	var reward: Array = _session.snapshot.get("reward_options", [])
 	var deck_size: int = _session.snapshot.run_deck_count
 	var carried_hp: int = _session.snapshot.players[_seat - 1].hp
-	if not _check(not reward.is_empty() and _cast().is_empty() and not _panel_visible(),
+	var overlay := _combat.get("reward_overlay") as Control
+	var reward_buttons := overlay.get_node("%RewardChoices")
+	if not _check(not reward.is_empty() and _cast().is_empty() and not _panel_visible()
+			and _combat.is_visible_in_tree() and overlay.is_visible_in_tree()
+			and reward_buttons.get_child_count() == reward.size(),
 			"opening victory closes the modal and presents only the assigned reward choices"):
 		return
-	if not _check(_session.submit_reward(reward[0].id if _seat == 1 else ""), "one seat takes a rune card and others skip"):
+	var draft := (reward_buttons.get_child(0) if _seat == 1 else overlay.get_node("%SkipReward")) as Button
+	if not _check(draft.is_visible_in_tree() and not draft.disabled, "one seat can take a rune card and others can skip"):
 		return
+	draft.pressed.emit()
 	if not await _wait_until(func() -> bool: return _session.snapshot.run_stage == CoopRun.PORTAL, "the portal vote"):
 		return
 	var portals: Array = _session.snapshot.get("portal_options", [])
+	var portal_controls := _combat.get_node("%PortalChoices") as Control
 	if not _check(not portals.is_empty() and portals[0].type == "Normal Encounter" and not portals[0].has("name")
-			and not _session.snapshot.has("reward_options"), "the portal gate reveals a category and discards the reward view"):
+			and not _session.snapshot.has("reward_options") and not overlay.visible
+			and reward_buttons.get_child_count() == 0 and portal_controls.is_visible_in_tree(),
+			"the physical gate appears on the same battlefield after the private reward view clears"):
 		return
-	if not _check(_session.submit_portal(portals[0].id), "submit the portal choice"):
+	var portal := portal_controls.get_child(0) as Button
+	if not _check(portal.get_meta("portal_id") == portals[0].id and not portal.disabled, "select the physical portal"):
 		return
+	await process_frame
+	await process_frame
+	var portal_art := portal.get_node("PortalArt") as Control
+	var position := portal_art.get_global_rect().get_center()
+	_mouse_button(position, true)
+	_mouse_button(position, false)
 	if not await _wait_until(func() -> bool: return _session.snapshot.get("encounter_id") == 2,
 			"the selected next encounter"):
 		return

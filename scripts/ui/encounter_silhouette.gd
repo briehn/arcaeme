@@ -6,6 +6,7 @@ var _kind := ""
 var _active := false
 var _alive := true
 var _seat := 0
+var _health := 1.0
 
 
 func _ready() -> void:
@@ -18,6 +19,11 @@ func display(kind: String, alive: bool, active := false, seat := 0) -> void:
 	_active = active
 	_alive = alive
 	_seat = seat
+	queue_redraw()
+
+
+func set_health(current: int, maximum: int) -> void:
+	_health = float(current) / maxi(1, maximum)
 	queue_redraw()
 
 
@@ -44,6 +50,13 @@ func _draw() -> void:
 		draw_set_transform(center, 0, Vector2.ONE * 0.38)
 		draw_string(font, Vector2(-text_width * 0.5, radius * 0.96), number, HORIZONTAL_ALIGNMENT_LEFT, -1,
 			font_size, Color("#21182d"))
+		draw_set_transform(center)
+		var health_start := Vector2(-0.40, 0.76) * radius
+		var health_end := Vector2(0.40, 0.76) * radius
+		draw_line(health_start, health_end, Color("#665779"), maxf(2.0, radius * 0.065), true)
+		if _health > 0.0:
+			draw_line(health_start, health_start.lerp(health_end, minf(1.0, _health)),
+				color, maxf(2.0, radius * 0.065), true)
 	else:
 		if _kind.contains("slime"):
 			draw_set_transform(center)

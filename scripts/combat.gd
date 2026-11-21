@@ -6,6 +6,9 @@ const EnemyAction = preload("res://scripts/combat/enemy_action.gd")
 const ViewSnapshot = preload("res://scripts/combat/combat_view_snapshot.gd")
 const WrappedTextButton = preload("res://scripts/ui/wrapped_text_button.gd")
 const Silhouette = preload("res://scripts/ui/encounter_silhouette.gd")
+const PortalChoiceButton = preload("res://scripts/ui/portal_choice_button.gd")
+const RewardOverlay = preload("res://scripts/ui/encounter_reward_overlay.gd")
+const REWARD_OVERLAY = preload("res://scenes/encounter_reward_overlay.tscn")
 const SpellDrawingSettings = preload("res://scripts/combat/spell_drawing_settings.gd")
 const SpellDrawingPanel = preload("res://scripts/ui/spell_drawing_panel.gd")
 const SPELL_DRAWING_PANEL = preload("res://scenes/spell_drawing_panel.tscn")
@@ -35,6 +38,9 @@ var bypass_drawing := false
 @onready var player_label: Label = %PlayerLabel
 @onready var mage_silhouettes: HBoxContainer = %MageSilhouettes
 @onready var single_enemy: HBoxContainer = %SingleEnemy
+@onready var portal_gate: VBoxContainer = %PortalGate
+@onready var portal_choices: HFlowContainer = %PortalChoices
+@onready var _combat_scroll: ScrollContainer = %CombatScroll
 @onready var enemy_label: Label = %EnemyLabel
 @onready var enemy_picker: VBoxContainer = %EnemyPicker
 @onready var target_label: Label = %TargetLabel
@@ -65,6 +71,10 @@ var _pending_card_copy := -1
 var _living_enemy_ids: Array[StringName] = []
 var _enemy_buttons: Dictionary[StringName, WrappedTextButton] = {}
 var _single_enemy_silhouette: Silhouette
+var reward_overlay: RewardOverlay
+var _portal_ids := PackedStringArray()
+var _portal_submit: Callable
+var _outcome_queued := false
 var _spell_panel: SpellDrawingPanel
 var _casting_copy := -1
 var _cast_opened_ms := 0
@@ -96,6 +106,7 @@ func display_network_snapshot(snapshot: Dictionary, input_allowed: bool, casting
 
 func clear_network_view() -> void:
 	clear_network_cast()
+	clear_encounter_intermission()
 	spell_feedback.hide()
 	_network_booster_primed = false
 	combat_log.clear()
@@ -119,6 +130,8 @@ func _ready() -> void:
 	_single_enemy_silhouette.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	single_enemy.add_child(_single_enemy_silhouette)
 	single_enemy.move_child(_single_enemy_silhouette, 0)
+	resized.connect(_size_combatants)
+	%CombatLogToggle.toggled.connect(_toggle_combat_log)
 	if _network_mode:
 		%TitleLabel.text = "Network Battle Mage Co-op Test"
 		%BackButton.hide()
@@ -140,6 +153,10 @@ func _ready() -> void:
 
 func _render() -> void:
 	_render_snapshot(ViewSnapshot.build(_state, encounter, _selected_player_id, true), true)
+	if not _run_title.is_empty() and not _outcome_queued \
+			and _state.phase in [CombatState.Phase.VICTORY, CombatState.Phase.DEFEAT]:
+		_outcome_queued = true
+		encounter_finished.emit.call_deferred(_state)
 
 
 func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
@@ -169,6 +186,8 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 		_:
 			turn_label.text = "Turn %d  /  %s" % [snapshot["round"], "Shared player phase" if coop else "Your turn"]
 	var stats := PackedStringArray()
+	mage_silhouettes.alignment = BoxContainer.ALIGNMENT_CENTER if party.size() <= 2 else BoxContainer.ALIGNMENT_BEGIN
+	player_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER if party.size() <= 2 else HORIZONTAL_ALIGNMENT_LEFT
 	for index in party.size():
 		var party_member: Dictionary = party[index]
 		var details := _player_stats(party_member, coop, phase)
@@ -180,10 +199,12 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 		var portrait := mage_silhouettes.get_child(index) as Silhouette
 		portrait.show()
 		portrait.display("mage", party_member.hp > 0, party_member.id == snapshot.viewer, index + 1)
+		portrait.set_health(party_member.hp, party_member.max_hp)
 	for unused in range(party.size(), mage_silhouettes.get_child_count()):
 		(mage_silhouettes.get_child(unused) as Control).hide()
 	player_label.text = "\n".join(stats)
 	_render_enemies(snapshot, in_combat, coop, pending_card_name)
+	_size_combatants()
 	cards_label.text = "Hand %d   ·   Draw pile %d   ·   Discard pile %d" % [
 		hand.size(), snapshot["draw_count"], snapshot["discard_count"]]
 	if snapshot.has("seed"):
@@ -198,21 +219,136 @@ func _render_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
 		if not progress.is_empty():
 			arcana_label.text += "  ·  " + progress
 		arcana_label.tooltip_text = arcana.description
-	var continue_run := not in_combat and not _run_title.is_empty()
 	var can_undo: bool = snapshot.get("can_undo_ready", false)
 	end_turn_button.text = "Undo Ready" if can_undo else "End Turn"
-	if continue_run:
-		end_turn_button.text = "Continue Run"
 	if coop:
 		cards_label.text = "%s   ·   %s" % [snapshot["viewer"], cards_label.text]
-		if not continue_run:
-			end_turn_button.text += " · %s" % snapshot["viewer"]
-	end_turn_button.disabled = not continue_run and (not input_allowed or not (snapshot["can_end_turn"] or can_undo))
+		end_turn_button.text += " · %s" % snapshot["viewer"]
+	for player: Dictionary in party:
+		if player.id == snapshot.viewer:
+			cards_label.text += "   ·   Mana %d/%d" % [player.mana, CombatState.TURN_MANA]
+			break
+	end_turn_button.disabled = not in_combat or not input_allowed or not (snapshot["can_end_turn"] or can_undo)
 	_render_hand(hand, input_allowed)
 	var log_lines: PackedStringArray = snapshot["log"]
 	while _shown_log_lines < log_lines.size():
 		combat_log.add_text(log_lines[_shown_log_lines] + "\n")
 		_shown_log_lines += 1
+
+
+func open_reward_overlay() -> RewardOverlay:
+	if reward_overlay == null:
+		reward_overlay = REWARD_OVERLAY.instantiate()
+		add_child(reward_overlay)
+	if not reward_overlay.visible:
+		_prepare_intermission()
+	return reward_overlay
+
+
+func show_encounter_portals(options: Array, votes: Dictionary, status: String, submit: Callable, enabled: bool) -> void:
+	var opening_gate := not portal_gate.visible
+	if opening_gate:
+		if reward_overlay != null and reward_overlay.visible:
+			reward_overlay.close_rewards()
+		_prepare_intermission()
+	portal_gate.show()
+	single_enemy.hide()
+	enemy_picker.hide()
+	_set_actor_lanes(true)
+	%PortalStatus.text = status
+	_portal_submit = submit
+	var ids := PackedStringArray()
+	for option: Dictionary in options:
+		ids.append(String(option.id))
+	if ids != _portal_ids:
+		_clear_portals()
+		_portal_ids = ids
+		for option: Dictionary in options:
+			var button := PortalChoiceButton.make(option)
+			button.pressed.connect(_select_portal.bind(button, String(option.id)))
+			portal_choices.add_child(button)
+			PortalChoiceButton.size_to_battlefield(button, size.x)
+	for button: Button in portal_choices.get_children():
+		button.disabled = not enabled
+		PortalChoiceButton.show_votes(button, votes)
+	if enabled and portal_choices.get_child_count() > 0:
+		var focus := get_viewport().gui_get_focus_owner()
+		if opening_gate or focus == null or not portal_choices.is_ancestor_of(focus):
+			portal_choices.get_child(0).grab_focus()
+
+
+func clear_encounter_intermission() -> void:
+	if reward_overlay != null and reward_overlay.visible:
+		reward_overlay.close_rewards()
+	if portal_gate.visible:
+		portal_gate.hide()
+		_clear_portals()
+		_portal_submit = Callable()
+	hand_cards.show()
+	cards_label.show()
+	end_turn_button.show()
+
+
+func _prepare_intermission() -> void:
+	_pending_card_copy = -1
+	player_selector.hide()
+	hand_cards.hide()
+	cards_label.hide()
+	end_turn_button.hide()
+	if not _network_mode:
+		arcana_label.hide()
+		spell_feedback.hide()
+	%CombatLogToggle.set_pressed_no_signal(false)
+	combat_log.hide()
+	_combat_scroll.scroll_vertical = 0
+
+
+func _clear_portals() -> void:
+	_portal_ids.clear()
+	for button in portal_choices.get_children():
+		portal_choices.remove_child(button)
+		button.queue_free()
+
+
+func _select_portal(button: Button, id: String) -> void:
+	if portal_gate.is_visible_in_tree() and not button.disabled and _portal_submit.is_valid():
+		_portal_submit.call(id)
+
+
+func _toggle_combat_log(shown: bool) -> void:
+	combat_log.visible = shown
+	if shown:
+		_scroll_to_combat_log.call_deferred()
+
+
+func _scroll_to_combat_log() -> void:
+	if combat_log.visible:
+		await get_tree().process_frame
+		_combat_scroll.ensure_control_visible(combat_log)
+
+
+func _size_combatants() -> void:
+	var mage_count := maxi(1, _snapshot.get("players", []).size())
+	var mage_width := clampf(size.x * (0.30 if mage_count >= 3 else 0.40) / mage_count, 68, 158)
+	var mage_side := minf(mage_width, clampf(size.y * 0.19, 74, 158))
+	for portrait: Control in mage_silhouettes.get_children():
+		portrait.custom_minimum_size = Vector2.ONE * mage_side
+	_single_enemy_silhouette.custom_minimum_size = Vector2.ONE * clampf(size.y * 0.25, 94, 206)
+	for portal: WrappedTextButton in portal_choices.get_children():
+		PortalChoiceButton.size_to_battlefield(portal, size.x)
+	var enemy_side := clampf(size.y * 0.15, 62, 164)
+	var column := clampf(size.x * 0.15, 180, 290)
+	var caption_font := 14 if size.x < 1050.0 else 15
+	for button: WrappedTextButton in _enemy_buttons.values():
+		var portrait := button.get_node("Silhouette") as Control
+		portrait.offset_left = -enemy_side * 0.5
+		portrait.offset_right = enemy_side * 0.5
+		portrait.offset_bottom = portrait.offset_top + enemy_side
+		button.add_theme_font_size_override("font_size", caption_font)
+		button.custom_minimum_size.x = column
+		for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+			button.get_theme_stylebox(state).content_margin_top = enemy_side + 10
+		button._fit_wrapped_text()
 
 
 func _render_enemies(snapshot: Dictionary, in_combat: bool, coop: bool, pending_card_name: String) -> void:
@@ -221,16 +357,21 @@ func _render_enemies(snapshot: Dictionary, in_combat: bool, coop: bool, pending_
 	for enemy: Dictionary in enemies:
 		if enemy.alive:
 			_living_enemy_ids.append(StringName(enemy.id))
-	enemy_picker.visible = enemies.size() > 1
-	single_enemy.visible = not enemy_picker.visible
+	var multiple := enemies.size() > 1
+	enemy_picker.visible = multiple and not portal_gate.visible
+	single_enemy.visible = not multiple and not portal_gate.visible
 	enemy_label.visible = single_enemy.visible
-	# Give the party more space for status rows when only one enemy needs a lane.
-	(mage_silhouettes.get_parent() as Control).size_flags_stretch_ratio = 1.0 if enemy_picker.visible else 2.0
-	(single_enemy.get_parent() as Control).size_flags_stretch_ratio = 2.0 if enemy_picker.visible else 1.0
-	if enemy_label.visible:
+	_set_actor_lanes(multiple or portal_gate.visible)
+	if not multiple:
 		_render_single_enemy(snapshot, in_combat, coop)
 		return
 	_render_enemy_picker(enemies, in_combat, coop, pending_card_name)
+
+
+func _set_actor_lanes(wide_opposition: bool) -> void:
+	var wide_party := 2.0 if _snapshot["players"].size() >= 3 else 1.35
+	(mage_silhouettes.get_parent() as Control).size_flags_stretch_ratio = 1.0 if wide_opposition else wide_party
+	(single_enemy.get_parent() as Control).size_flags_stretch_ratio = 2.0 if wide_opposition else 1.0
 
 
 func _render_single_enemy(snapshot: Dictionary, in_combat: bool, coop: bool) -> void:
@@ -267,6 +408,7 @@ func _render_enemy_picker(enemies: Array, in_combat: bool, coop: bool, pending_c
 		if button == null:
 			button = WrappedTextButton.new()
 			button.custom_minimum_size = Vector2(172, 106)
+			button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 			button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			button.add_theme_font_size_override("font_size", 15)
 			button.pressed.connect(_on_enemy_selected.bind(enemy_id))
@@ -281,8 +423,15 @@ func _render_enemy_picker(enemies: Array, in_combat: bool, coop: bool, pending_c
 			portrait.offset_top = 3
 			portrait.offset_bottom = 45
 			for state in ["normal", "hover", "pressed", "disabled", "focus"]:
-				var style := button.get_theme_stylebox(state).duplicate() as StyleBox
-				style.content_margin_top = 46
+				var style := StyleBoxFlat.new()
+				style.bg_color = Color.TRANSPARENT
+				if state in ["hover", "pressed", "focus"]:
+					style.border_color = TARGET_HIGHLIGHT if state != "hover" else Color("#9b86b9")
+					style.set_border_width_all(1)
+					style.set_corner_radius_all(12)
+				style.content_margin_left = 8
+				style.content_margin_right = 8
+				style.content_margin_bottom = 8
 				button.add_theme_stylebox_override(state, style)
 		var silhouette := button.get_node("Silhouette") as Silhouette
 		silhouette.display(enemy.name, enemy.alive, choosing_target and enemy.alive and button.has_focus())
@@ -727,9 +876,6 @@ func _on_end_turn_button_pressed() -> void:
 			network_undo_ready_requested.emit()
 		else:
 			network_end_turn_requested.emit()
-		return
-	if not _run_title.is_empty() and (_state.phase == CombatState.Phase.VICTORY or _state.phase == CombatState.Phase.DEFEAT):
-		encounter_finished.emit(_state)
 		return
 	var changed := _state.undo_ready(_selected_player_id) if can_undo else _state.end_turn(_selected_player_id)
 	if changed:

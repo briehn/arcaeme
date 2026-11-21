@@ -119,6 +119,14 @@ func _test_menu() -> void:
 func _test_combat(scene: PackedScene, context: String, status_mode: bool) -> void:
 	var combat := await _open(scene)
 	await _check_combat(combat, context)
+	if scene == SOLO:
+		var log := _control(combat, "%CombatLog")
+		var log_toggle := _control(combat, "%CombatLogToggle") as Button
+		_check(not log.visible and await _reach(log_toggle), "combat log is collapsed and reachable")
+		await _act_on(log_toggle, "open combat log")
+		_check(log.visible and await _reach(log), "expanded combat log is visible")
+		await _act_on(log_toggle, "close combat log")
+		_check(not log.visible, "collapsing the log returns its space to the hand")
 	var end := _control(combat, "%EndTurnButton") as Button
 	var initial_turn: String = (_control(combat, "%TurnLabel") as Label).text
 	var initial_hp := (_control(combat, "%PlayerLabel") as Label).text
@@ -164,41 +172,55 @@ func _test_multi_enemy_run(local_coop: bool) -> void:
 	if not local_coop:
 		await _act_on(choices.get_child(0) as Button, "solo multi-enemy opening")
 	await _check_run_encounter(run, "Encounter 1 of 3", "Two Slimes")
+	var battlefield := run.get_node("Combat") as Control
 	await _finish_displayed_fight(run)
 	var heading := _control(run, "%Heading") as Label
+	var reward := _reward_overlay(battlefield)
+	var offers := _control(reward, "%RewardChoices")
+	var skip := _control(reward, "%SkipReward") as Button
+	var status := _control(reward, "%RewardStatus") as Label
+	_check(run.get_node("Combat") == battlefield and reward.is_visible_in_tree(),
+		"victory automatically opens rewards above the same battlefield")
 	if local_coop:
-		var deck_title := _control(run, "%DeckTitle") as Label
-		var deck_list := _control(run, "%DeckList") as RichTextLabel
-		_check("0/2" in heading.text and choices.get_child_count() == 1 and not deck_title.visible,
+		var reveal := _control(reward, "%RevealReward") as Button
+		var deck_toggle := _control(reward, "%DeckToggle") as Button
+		var deck_list := _control(reward, "%DeckList") as Label
+		_check("0/2" in status.text and offers.get_child_count() == 0 and not deck_toggle.visible
+			and "Battle Mage 1" in reveal.text,
 			"local handoff waits for Mage 1 to reveal their reward")
-		await _act_on(choices.get_child(0) as Button, "Mage 1 reward reveal")
-		_check(deck_title.visible and not deck_list.text.is_empty() and choices.get_child_count() > 1,
+		await _act_on(reveal, "Mage 1 reward reveal")
+		await _act_on(deck_toggle, "Mage 1 private run deck")
+		_check(deck_list.visible and not deck_list.text.is_empty() and offers.get_child_count() > 1,
 			"Mage 1's own deck and choices are visible after reveal")
-		await _act_on(choices.get_child(0) as Button, "Mage 1 reward choice")
-		_check("1/2" in heading.text and not deck_title.visible and deck_list.text.is_empty()
-			and choices.get_child(0).text == "Show Battle Mage 2 Reward",
+		await _act_on(offers.get_child(0) as Button, "Mage 1 reward choice")
+		_check("1/2" in status.text and not deck_toggle.visible and deck_list.text.is_empty()
+			and offers.get_child_count() == 0 and "Battle Mage 2" in reveal.text,
 			"local reward pass hides Mage 1's choice and deck before Mage 2")
-		await _act_on(choices.get_child(0) as Button, "Mage 2 reward reveal")
-		_check("%d cards" % MULTI_ENEMY_RUN.starting_deck.size() in deck_title.text,
+		await _act_on(reveal, "Mage 2 reward reveal")
+		await _act_on(deck_toggle, "Mage 2 private run deck")
+		_check(_private_deck_size(deck_list.text) == MULTI_ENEMY_RUN.starting_deck.size(),
 			"Mage 2 sees their own starting deck before making a choice")
-		await _act_on(choices.get_child(choices.get_child_count() - 1) as Button, "Mage 2 reward skip")
+		await _act_on(skip, "Mage 2 reward skip")
 	else:
-		_check(heading.text == "Choose a card reward" and "Goblin + Treant" in (_control(run, "%Message") as Label).text,
+		_check("Card reward" in (_control(reward, "%RewardTitle") as Label).text
+			and "Goblin + Treant" in status.text,
 			"solo reward panel names the next encounter")
-		await _act_on(choices.get_child(0) as Button, "solo multi-enemy reward choice")
+		await _act_on(offers.get_child(0) as Button, "solo multi-enemy reward choice")
 		_check("Encounter 2 of 3" in heading.text, "solo post-reward screen previews encounter two")
 		await _act_on(choices.get_child(0) as Button, "solo second encounter")
 	await _check_run_encounter(run, "Encounter 2 of 3", "Goblin + Treant")
 	await _finish_displayed_fight(run)
+	reward = _reward_overlay(run.get_node("Combat") as Control)
+	skip = _control(reward, "%SkipReward") as Button
 	if local_coop:
-		_check("0/2" in heading.text and choices.get_child(0).text == "Show Battle Mage 1 Reward",
+		var reveal := _control(reward, "%RevealReward") as Button
+		_check("0/2" in (_control(reward, "%RewardStatus") as Label).text and "Battle Mage 1" in reveal.text,
 			"local reward decisions reopen for both Mages after the second encounter")
 		for seat in 2:
-			await _act_on(choices.get_child(0) as Button, "second reward reveal for Mage %d" % (seat + 1))
-			await _act_on(choices.get_child(choices.get_child_count() - 1) as Button,
-				"second reward skip for Mage %d" % (seat + 1))
+			await _act_on(reveal, "second reward reveal for Mage %d" % (seat + 1))
+			await _act_on(skip, "second reward skip for Mage %d" % (seat + 1))
 	else:
-		await _act_on(choices.get_child(choices.get_child_count() - 1) as Button, "solo second reward skip")
+		await _act_on(skip, "solo second reward skip")
 		await _act_on(choices.get_child(0) as Button, "solo Citadel Warden encounter")
 	await _check_run_encounter(run, "Encounter 3 of 3", "Boss: Citadel Warden")
 	await _finish_displayed_fight(run)
@@ -217,18 +239,27 @@ func _test_expanded_rewards(local_coop: bool) -> void:
 	if not local_coop:
 		await _act_on(choices.get_child(0) as Button, "expanded reward run opening")
 	await _finish_displayed_fight(run)
+	var reward := _reward_overlay(run.get_node("Combat") as Control)
+	var reveal := _control(reward, "%RevealReward") as Button
+	var skip := _control(reward, "%SkipReward") as Button
+	var offers := _control(reward, "%RewardChoices")
 	if local_coop:
-		await _act_on(choices.get_child(0) as Button, "expanded reward reveal")
-	_check(choices.get_child_count() == 4, "expanded run displays three choices and Skip")
-	for button: Button in choices.get_children():
+		await _act_on(reveal, "expanded reward reveal")
+	_check(offers.get_child_count() == 3 and await _reach(skip), "expanded run displays three choices and Skip")
+	var accents: Array[Color] = []
+	for button: Button in offers.get_children():
 		_check(await _reach(button), "expanded reward is reachable")
 		_check_button_text(button, "expanded reward")
-	await _act_on(choices.get_child(0) as Button, "take the first expanded reward")
+		var frame := button.get_theme_stylebox("normal") as StyleBoxFlat
+		if frame != null and frame.border_color not in accents:
+			accents.append(frame.border_color)
+	_check(accents.size() == 3, "the three reward cards have distinct visual accents")
+	await _act_on(offers.get_child(0) as Button, "take the first expanded reward")
 	if local_coop:
-		_check(choices.get_child_count() == 1 and "Battle Mage 2" in choices.get_child(0).text,
+		_check(offers.get_child_count() == 0 and reveal.visible and "Battle Mage 2" in reveal.text,
 			"local handoff keeps the prior seat's expanded options private")
-		await _act_on(choices.get_child(0) as Button, "expand the second seat's reward")
-		await _act_on(choices.get_child(3) as Button, "skip the second seat's expanded reward")
+		await _act_on(reveal, "expand the second seat's reward")
+		await _act_on(skip, "skip the second seat's expanded reward")
 	else:
 		await _act_on(choices.get_child(0) as Button, "start the next fight with the expanded reward")
 	await _check_run_encounter(run, "Encounter 2 of 3", "Goblin + Treant")
@@ -254,29 +285,44 @@ func _test_portal_run(local_coop: bool) -> void:
 	if not local_coop:
 		await _act_on(choices.get_child(0) as Button, "solo portal opening")
 	await _check_run_encounter(run, "Encounter 1 of 4", "Two Slimes")
+	var battlefield := run.get_node("Combat") as Control
 	await _finish_displayed_fight(run)
+	var reward := _reward_overlay(battlefield)
+	var skip := _control(reward, "%SkipReward") as Button
+	var portals := _control(battlefield, "%PortalChoices")
+	_check(reward.is_visible_in_tree() and not portals.is_visible_in_tree(),
+		"private reward opens automatically before portals")
+	if not local_coop:
+		await _capture_intermission("reward")
 	if local_coop:
+		var reveal := _control(reward, "%RevealReward") as Button
 		for seat in 2:
-			await _act_on(choices.get_child(0) as Button, "portal reward reveal for Mage %d" % (seat + 1))
-			await _act_on(choices.get_child(choices.get_child_count() - 1) as Button,
-				"portal reward skip for Mage %d" % (seat + 1))
+			await _act_on(reveal, "portal reward reveal for Mage %d" % (seat + 1))
+			await _act_on(skip, "portal reward skip for Mage %d" % (seat + 1))
 	else:
-		await _act_on(choices.get_child(choices.get_child_count() - 1) as Button, "solo portal reward skip")
-	var heading := _control(run, "%Heading") as Label
-	_check("Choose a Portal" in heading.text and choices.get_child_count() == 2
-		and not _control(run, "%DeckTitle").visible, "portals replace personal rewards in the post-encounter panel")
-	for choice: Button in choices.get_children():
+		await _act_on(skip, "solo portal reward skip")
+	var portal_status := _control(battlefield, "%PortalStatus") as Label
+	_check(run.get_node("Combat") == battlefield and portals.get_child_count() == 2
+		and not reward.visible and _control(reward, "%RewardChoices").get_child_count() == 0
+		and not _control(battlefield, "%EnemyPicker").visible,
+		"physical portals replace opposition on the same battlefield after private choices clear")
+	if not local_coop:
+		await _capture_intermission("portals")
+	for choice: Button in portals.get_children():
 		_check(choice.has_meta(&"portal_id") and choice.text == "Normal Encounter\nNext portals: Normal Encounter / Normal Encounter"
 			and choice.tooltip_text.is_empty()
 			and await _reach(choice), "portal choice shows a readable one-step branch")
 		_check_button_text(choice, "portal preview")
-	var chosen_portal := choices.get_child(0) as Button
+	var chosen_portal := portals.get_child(0) as Button
+	var old_view_id := battlefield.get_instance_id()
 	var route := PortalRoute.new(MULTI_ENEMY_RUN.run_seed)
 	var next_name := route.destination(PortalRoute.START, StringName(chosen_portal.get_meta(&"portal_id"))).enemy_name
 	await _act_on(chosen_portal, "choose a portal")
 	if local_coop:
-		_check("1/2" in heading.text and not run.has_node("Combat"), "local portal waits for both Mages")
-		await _act_on(choices.get_child(0) as Button, "choose a portal for the second Mage")
+		_check("1/2" in portal_status.text and run.get_node("Combat") == battlefield,
+			"local portal waits on the same battlefield for both Mages")
+		await _act_on(portals.get_child(0) as Button, "choose a portal for the second Mage")
+	_check(run.get_node("Combat").get_instance_id() != old_view_id, "portal vote starts a fresh combat view")
 	await _check_run_encounter(run, "Encounter 2 of 4", next_name)
 	await _close(run)
 
@@ -332,7 +378,28 @@ func _finish_displayed_fight(run: Control) -> void:
 	combat._state.phase = CombatState.Phase.VICTORY
 	combat._render()
 	await _settle()
-	await _act_on(_control(combat, "%EndTurnButton") as Button, "continue run after combat")
+
+
+func _reward_overlay(combat: Control) -> Control:
+	return combat.get("reward_overlay") as Control
+
+
+func _private_deck_size(list: String) -> int:
+	var count := 0
+	for line in list.split("\n"):
+		var copies := line.get_slice(" × ", 0)
+		if copies.is_valid_int():
+			count += copies.to_int()
+	return count
+
+
+func _capture_intermission(stage: String) -> void:
+	if DisplayServer.get_name() == "headless" or _size != Vector2i(1920, 1080) \
+			or "--capture-intermission" not in OS.get_cmdline_user_args():
+		return
+	await RenderingServer.frame_post_draw
+	var path := OS.get_environment("TEMP").path_join("arcaeme-m22b-%s-1920x1080.png" % stage)
+	_check(_viewport.get_texture().get_image().save_png(path) == OK, "capture 1920×1080 " + stage)
 
 
 func _act_on(button: Button, context: String) -> void:
@@ -543,13 +610,19 @@ func _test_network() -> void:
 	session.snapshot = _reward_snapshot(snapshot)
 	session.changed.emit()
 	await _settle()
-	_check(not combat.is_visible_in_tree(), "reward panels replace network combat")
+	var reward := _reward_overlay(combat)
+	var reward_choices := _control(reward, "%RewardChoices")
+	var reward_skip := _control(reward, "%SkipReward")
+	var reward_status := _control(reward, "%RewardStatus") as Label
+	_check(combat.is_visible_in_tree() and reward.is_visible_in_tree() and end.disabled
+		and not _control(scene, "%RewardPanel").visible,
+		"network rewards dim the same battlefield with combat actions disabled")
 	_check_control(_control(scene, "%RunStage"), "network reward")
-	_check_control(_control(scene, "%RewardProgress"), "network reward")
-	_check_control(_control(scene, "%SkipReward"), "network reward")
-	for choice in _control(scene, "%RewardChoices").get_children():
+	_check_control(reward_status, "network reward")
+	_check_control(reward_skip, "network reward")
+	for choice in reward_choices.get_children():
 		_check(await _reach(choice), "network reward %s is reachable" % choice.text.get_slice("\n", 0))
-	_check_control(_control(scene, "%SkipReward"), "network reward after choice navigation")
+	_check_control(reward_skip, "network reward after choice navigation")
 	session.snapshot.reward_options = []
 	for card in [MIRROR_LUNGE, SHATTERGUARD, TACTICIANS_PAGE]:
 		session.snapshot.reward_options.append({"id": String(card.id), "name": card.display_name,
@@ -561,36 +634,41 @@ func _test_network() -> void:
 	session.changed.emit()
 	await _settle()
 	var run_stage := _control(scene, "%RunStage") as Label
-	var reward_status := _control(scene, "%RewardStatus") as Label
 	_check("Encounter 2 of 3" in run_stage.text and "Goblin + Treant" in run_stage.text
 		and "Citadel Warden" in reward_status.text, "network reward shows the completed and next encounter")
 	_check_control(run_stage, "multi-enemy network reward")
 	_check_control(reward_status, "multi-enemy network reward")
-	_check_control(_control(scene, "%SkipReward"), "multi-enemy network reward")
-	for choice: Button in _control(scene, "%RewardChoices").get_children():
+	_check_control(reward_skip, "multi-enemy network reward")
+	for choice: Button in reward_choices.get_children():
 		_check(await _reach(choice), "long expanded network reward is reachable")
 		_check_button_text(choice, "long expanded network reward")
 	session.snapshot.merge({
-		"run_stage": "portal", "encounter_id": 1, "encounter_count": 4, "enemy_name": "Two Slimes",
+		"run_stage": "portal", "encounter_id": 2, "encounter_count": 4, "enemy_name": "Two Slimes",
 		"portal_ready": 0, "portal_submitted": false,
 		"portal_options": PortalRoute.new(MULTI_ENEMY_RUN.run_seed).options(&"two_slimes"),
 	}, true)
+	session.snapshot.erase("reward_options")
 	session.changed.emit()
 	await _settle()
-	_check("Choose a Portal" in run_stage.text and not skip.visible and not combat.is_visible_in_tree(),
-		"network portal choices replace rewards without a map transition")
-	_check_control(_control(scene, "%RewardProgress"), "network portal progress")
-	var portals := _control(scene, "%RewardChoices")
+	var portal_status := _control(combat, "%PortalStatus") as Label
+	_check("Choose a Portal" in run_stage.text and not reward.visible and combat.is_visible_in_tree()
+		and reward_choices.get_child_count() == 0, "network portals appear after private rewards clear")
+	_check_control(portal_status, "network portal progress")
+	var portals := _control(combat, "%PortalChoices")
 	_check(portals.get_child_count() == 2, "network portal view removed the previous reward buttons")
 	for choice: Button in portals.get_children():
 		_check(choice.has_meta(&"portal_id") and await _reach(choice), "network branch preview is reachable")
 		_check_button_text(choice, "network portal preview")
 	session.snapshot.portal_submitted = true
 	session.snapshot.portal_ready = 1
+	var selected_portal: String = session.snapshot.portal_options[0].id
+	session.snapshot.portal_votes = {String(NAMES[0]): selected_portal}
 	session.changed.emit()
 	await _settle()
-	_check((portals.get_child(0) as Button).disabled and "1/4" in
-		(_control(scene, "%RewardProgress") as Label).text, "network portal vote locks while waiting")
+	_check((portals.get_child(0) as Button).disabled and "1/4" in portal_status.text,
+		"network portal vote locks while waiting")
+	_check(NAMES[0] in (portals.get_child(0).get_node("PortalVoters") as Label).text,
+		"network portal associates the current vote with its Mage")
 	await _close(scene)
 
 
@@ -613,7 +691,8 @@ func _test_network_enemy_picker(session: NetworkSession, combat: Control) -> voi
 	_check(targets.get_child_count() == 3 and not _control(combat, "%EnemyLabel").visible,
 		"four-player network combat shows all three enemies in the target picker")
 	for button: Button in targets.get_children():
-		_check(await _reach(button), "network enemy display %s is reachable" % button.text.get_slice("\n", 0))
+		_check(await _reach(button), "network enemy display %s is reachable (rect %s)" %
+			[button.text.get_slice("\n", 0), button.get_global_rect()])
 		_check_button_text(button, button.text.get_slice("\n", 0) + "'s status and intent")
 	var goblin := targets.get_child(1) as Button
 	var treant := targets.get_child(2) as Button
@@ -754,13 +833,17 @@ func _test_long_hand(session: NetworkSession, combat: Control, snapshot: Diction
 
 
 func _reward_snapshot(snapshot: Dictionary) -> Dictionary:
-	var reward := snapshot.duplicate()
+	var reward := snapshot.duplicate(true)
 	var options: Array[Dictionary] = []
 	for card in preload("res://resources/prototype/battle_mage_run.tres").reward_candidates:
 		options.append({"id": String(card.id), "name": card.display_name, "cost": card.mana_cost,
 			"description": card.description()})
 	reward.merge({"run_stage": "reward", "encounter_id": 1, "reward_ready": 1, "reward_submitted": false,
-		"reward_options": options})
+		"reward_options": options, "phase": CombatState.Phase.VICTORY, "enemy_hp": 0,
+		"can_end_turn": false, "can_undo_ready": false}, true)
+	for enemy in reward.enemies:
+		enemy.hp = 0
+		enemy.alive = false
 	return reward
 
 

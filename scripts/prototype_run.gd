@@ -9,7 +9,6 @@ const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const MajorArcana = preload("res://scripts/run/major_arcana.gd")
 const PacingExperiment = preload("res://scripts/run/pacing_experiment.gd")
 const PacingVariantPicker = preload("res://scripts/ui/pacing_variant_picker.gd")
-const PortalChoiceButton = preload("res://scripts/ui/portal_choice_button.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const RunState = preload("res://scripts/run/run_state.gd")
 const SpellDrawingSettings = preload("res://scripts/combat/spell_drawing_settings.gd")
@@ -28,8 +27,6 @@ var bypass_drawing := false
 @onready var run_status: Label = %RunStatus
 @onready var message: Label = %Message
 @onready var choices: BoxContainer = %Choices
-@onready var deck_panel: Control = %DeckList.get_parent()
-@onready var portal_backdrop: TextureRect = %PortalBackdrop
 @onready var deck_title: Label = %DeckTitle
 @onready var deck_list: RichTextLabel = %DeckList
 @onready var back_button: Button = %RunBackButton
@@ -67,13 +64,6 @@ func _render_panel(focus_choice := true) -> void:
 	for choice in choices.get_children():
 		choices.remove_child(choice)
 		choice.queue_free()
-	var portal_stage := _local_run.stage == CoopRunState.PORTAL if local_coop else _run.stage == RunState.Stage.PORTAL
-	portal_backdrop.visible = portal_stage
-	deck_panel.visible = not portal_stage
-	$RunPanel/Layout/Title.visible = not portal_stage
-	choices.vertical = not portal_stage
-	choices.alignment = BoxContainer.ALIGNMENT_CENTER if portal_stage else BoxContainer.ALIGNMENT_BEGIN
-	choices.size_flags_vertical = Control.SIZE_EXPAND_FILL if portal_stage else Control.SIZE_FILL
 	if local_coop:
 		_render_local_panel()
 	else:
@@ -89,8 +79,6 @@ func _render_panel(focus_choice := true) -> void:
 func _render_solo_panel() -> void:
 	pacing_controls.visible = enable_pacing_variants and _run.stage == RunState.Stage.ROUTE
 	message.text = ""
-	deck_title.visible = _run.stage != RunState.Stage.PORTAL
-	deck_list.visible = deck_title.visible
 	match _run.stage:
 		RunState.Stage.ARCANA:
 			heading.text = "Choose a Major Arcana"
@@ -106,21 +94,6 @@ func _render_solo_panel() -> void:
 			for encounter in run_data.opening_encounters:
 				_add_choice("%s\n%s" % [encounter.enemy_name, _encounter_preview(encounter)],
 					_choose_opening.bind(encounter.enemy_id))
-		RunState.Stage.REWARD:
-			heading.text = "Choose a card reward"
-			message.text = "Choose one provisional Battle Mage card for this run, or skip."
-			if run_data.portal_enabled:
-				message.text += " The portals open after your reward decision."
-			elif _multi_enemy_route():
-				message.text += " Next encounter: %s." % _run.next_encounter().enemy_name
-			for card in _run.reward_options():
-				_add_choice("%s  ·  %d Mana\n%s" % [card.display_name, card.mana_cost, card.description()],
-					_take_reward.bind(card.id))
-			_add_choice("Skip Reward", _skip_reward)
-		RunState.Stage.PORTAL:
-			heading.text = "Choose a Portal"
-			message.text = "The portals here lead to your next encounter. Each preview shows one step ahead."
-			_add_portal_choices(_run.portal_options(), _submit_solo_portal)
 		RunState.Stage.NEXT_READY, RunState.Stage.BOSS_READY:
 			heading.text = "Ready for the boss" if run_data.title.is_empty() else "Ready for the final encounter"
 			var next := _run.next_encounter()
@@ -138,9 +111,8 @@ func _render_solo_panel() -> void:
 	run_status.text = "Battle Mage  ·  HP %d/%d  ·  Run seed %d" % [_run.current_hp, _run.max_hp, _run.run_seed]
 	if _multi_enemy_route() and _run.encounter_id > 0:
 		run_status.text += "  ·  " + _encounter_title(_run.encounter_id, _run.active_encounter)
-	if _run.stage != RunState.Stage.PORTAL:
-		_append_arcana_name(_run.selected_arcana)
-		_render_deck(_run.deck_cards())
+	_append_arcana_name(_run.selected_arcana)
+	_render_deck(_run.deck_cards())
 
 
 func _render_local_panel() -> void:
@@ -152,35 +124,9 @@ func _render_local_panel() -> void:
 		_render_local_arcana()
 		return
 	run_status.text = _encounter_title(_local_run.encounter_id, _local_run.active_encounter)
-	var stats_separator := "  ·  " if _local_run.stage == CoopRunState.PORTAL else "\n"
 	for mage in _local_run.active_combat.players.values():
-		run_status.text += stats_separator + "%s  ·  HP %d/%d" % [mage.id, mage.hp, mage.max_hp]
+		run_status.text += "\n%s  ·  HP %d/%d" % [mage.id, mage.hp, mage.max_hp]
 	match _local_run.stage:
-		CoopRunState.REWARD:
-			var player := LOCAL_MAGES[_local_choice_index]
-			var view := _local_run.view_fields(player)
-			var transition := (" The portals open after everyone's reward decision." if view.get("portal_after_reward", false)
-				else " Next: %s." % view.next_encounter_name)
-			heading.text = "Card reward  ·  %d/%d decisions submitted" % [view.reward_ready, LOCAL_MAGES.size()]
-			if _local_choice_revealed:
-				message.text = "%s: choose a Battle Mage card or skip." % player + transition
-				_append_arcana_name(_local_run.selected_arcana(player))
-				deck_title.show()
-				deck_list.show()
-				_render_deck(_local_run.deck_cards(player))
-				for card: Dictionary in view.reward_options:
-					_add_choice("%s  ·  %d Mana\n%s" % [card.name, card.cost, card.description],
-						_submit_local_reward.bind(StringName(card.id), player, _local_run.encounter_id))
-				_add_choice("Skip Reward", _submit_local_reward.bind(&"", player, _local_run.encounter_id))
-			else:
-				message.text = "Pass controls to %s." % player + transition
-				_add_choice("Show %s Reward" % player, _show_local_choice.bind(player, _local_run.encounter_id, CoopRunState.REWARD))
-		CoopRunState.PORTAL:
-			var player := LOCAL_MAGES[_local_choice_index]
-			var view := _local_run.view_fields(player)
-			heading.text = "Choose a Portal  ·  %d/%d decisions submitted" % [view.portal_ready, LOCAL_MAGES.size()]
-			message.text = "%s: select a portal. One Mage's choice is drawn after everyone submits." % player
-			_add_portal_choices(view.portal_options, _submit_local_portal.bind(player, _local_run.encounter_id), view.portal_votes)
 		CoopRunState.VICTORY:
 			heading.text = "Run Victory"
 			message.text = "Your party defeated %s and completed the prototype run." % _local_run.active_encounter.enemy_name
@@ -208,14 +154,6 @@ func _add_arcana_choices(options: Array, submit: Callable) -> void:
 	_add_choice("Skip Arcana", submit.bind(&""))
 
 
-func _add_portal_choices(options: Array, submit: Callable, votes: Dictionary = {}) -> void:
-	for option: Dictionary in options:
-		var button := PortalChoiceButton.make(option)
-		PortalChoiceButton.show_votes(button, votes)
-		button.pressed.connect(submit.bind(StringName(option.id)))
-		choices.add_child(button)
-
-
 func _append_arcana_name(id: StringName) -> void:
 	if id != &"":
 		run_status.text += "\nMajor Arcana: " + String(MajorArcana.view(id).name)
@@ -230,7 +168,10 @@ func _show_local_choice(player: StringName, encounter_id: int, stage: String) ->
 	if (_local_run.stage == stage and not _local_choice_revealed
 			and _local_run.encounter_id == encounter_id and LOCAL_MAGES[_local_choice_index] == player):
 		_local_choice_revealed = true
-		_render_panel()
+		if stage == CoopRunState.REWARD:
+			_render_intermission()
+		else:
+			_render_panel()
 
 
 func _submit_local_arcana(id: StringName, player: StringName) -> void:
@@ -240,23 +181,23 @@ func _submit_local_arcana(id: StringName, player: StringName) -> void:
 	_advance_local_choice(CoopRunState.ARCANA)
 
 
-func _submit_local_reward(card_id: StringName, player: StringName, encounter_id: int) -> void:
+func _submit_local_reward(card_id: String, player: StringName, encounter_id: int) -> void:
 	if (not _local_choice_revealed or _local_run.stage != CoopRunState.REWARD
 			or _local_run.encounter_id != encounter_id or LOCAL_MAGES[_local_choice_index] != player):
 		return
-	if not _local_run.submit_reward(player, card_id):
+	if not _local_run.submit_reward(player, StringName(card_id)):
 		return
 	_advance_local_choice(CoopRunState.REWARD)
 
 
-func _submit_solo_portal(portal_id: StringName) -> void:
-	if _run.submit_portal(portal_id):
+func _submit_solo_portal(portal_id: String) -> void:
+	if _run.submit_portal(StringName(portal_id)):
 		_show_solo_combat("Encounter")
 
 
-func _submit_local_portal(portal_id: StringName, player: StringName, encounter_id: int) -> void:
+func _submit_local_portal(portal_id: String, player: StringName, encounter_id: int) -> void:
 	if (_local_run.stage != CoopRunState.PORTAL or _local_run.encounter_id != encounter_id
-			or LOCAL_MAGES[_local_choice_index] != player or not _local_run.submit_portal(player, portal_id)):
+			or LOCAL_MAGES[_local_choice_index] != player or not _local_run.submit_portal(player, StringName(portal_id))):
 		return
 	_advance_local_choice(CoopRunState.PORTAL)
 
@@ -265,11 +206,14 @@ func _advance_local_choice(stage: String) -> void:
 	_local_choice_revealed = false
 	if _local_run.stage == stage:
 		_local_choice_index += 1
-		_render_panel()
+		if stage == CoopRunState.ARCANA:
+			_render_panel()
+		else:
+			_render_intermission()
 	else:
 		_local_choice_index = 0
 		if _local_run.stage == CoopRunState.PORTAL:
-			_render_panel()
+			_render_intermission()
 		else:
 			_show_local_combat()
 
@@ -300,13 +244,17 @@ func _encounter_preview(encounter: EncounterData) -> String:
 
 func _render_deck(deck: Array[CardData]) -> void:
 	deck_title.text = "Run deck  ·  %d cards" % deck.size()
+	deck_list.text = _deck_text(deck)
+
+
+func _deck_text(deck: Array[CardData]) -> String:
 	var copies: Dictionary[CardData, int] = {}
 	for card in deck:
 		copies[card] = copies.get(card, 0) + 1
 	var lines := PackedStringArray()
 	for card: CardData in copies:
 		lines.append("%d × %s" % [copies[card], card.display_name])
-	deck_list.text = "\n".join(lines)
+	return "\n".join(lines)
 
 
 func _add_choice(label: String, action: Callable) -> void:
@@ -323,13 +271,14 @@ func _choose_opening(encounter_id: StringName) -> void:
 		_show_solo_combat("Opening Encounter")
 
 
-func _take_reward(card_id: StringName) -> void:
-	if _run.take_reward(card_id):
-		_render_panel()
-
-
-func _skip_reward() -> void:
-	if _run.skip_reward():
+func _submit_solo_reward(card_id: String) -> void:
+	var accepted := _run.skip_reward() if card_id.is_empty() else _run.take_reward(StringName(card_id))
+	if not accepted:
+		return
+	if _run.stage == RunState.Stage.PORTAL:
+		_render_intermission()
+	else:
+		_remove_combat()
 		_render_panel()
 
 
@@ -359,8 +308,8 @@ func _show_local_combat() -> void:
 
 
 func _show_combat(combat: CombatState, encounter: EncounterData, stage_title: String, index: int) -> void:
+	_remove_combat()
 	run_panel.hide()
-	portal_backdrop.hide()
 	_combat_view = COMBAT_SCENE.instantiate()
 	var run_title := "Prototype Run" if run_data.title.is_empty() else run_data.title
 	_combat_view.configure_run(combat, encounter, "%s  /  %s" % [run_title, stage_title])
@@ -384,10 +333,58 @@ func _finish_encounter(combat: CombatState) -> void:
 		_local_choice_revealed = false
 	elif not _run.finish_combat(combat):
 		return
+	var rewarding := _local_run.stage == CoopRunState.REWARD if local_coop else _run.stage == RunState.Stage.REWARD
+	if rewarding:
+		_render_intermission()
+	else:
+		_remove_combat()
+		_render_panel()
+
+
+func _render_intermission() -> void:
+	if not local_coop:
+		if _run.stage == RunState.Stage.PORTAL:
+			_combat_view.show_encounter_portals(_run.portal_options(), {}, "Choose a portal", _submit_solo_portal, true)
+			return
+		var options: Array[Dictionary] = []
+		for card: CardData in _run.reward_options():
+			options.append({"name": card.display_name, "cost": card.mana_cost,
+				"description": card.description(), "id": String(card.id)})
+		var status := "Choose a card for your run deck, or skip."
+		if run_data.portal_enabled:
+			status += " Your portals open after this decision."
+		elif _run.next_encounter() != null:
+			status += " Next: %s." % _run.next_encounter().enemy_name
+		_combat_view.open_reward_overlay().show_rewards("Victory · Card reward", status, options,
+			_submit_solo_reward, true, Callable(), "", _deck_text(_run.deck_cards()))
+		return
+	var player := LOCAL_MAGES[_local_choice_index]
+	var view := _local_run.view_fields(player)
+	var index := _local_run.encounter_id
+	if _local_run.stage == CoopRunState.PORTAL:
+		var status := "%s: choose a portal · %d/%d choices submitted" % [player, view.portal_ready, LOCAL_MAGES.size()]
+		_combat_view.show_encounter_portals(view.portal_options, view.portal_votes, status,
+			_submit_local_portal.bind(player, index), true)
+		return
+	var progress := "%d/%d decisions submitted" % [view.reward_ready, LOCAL_MAGES.size()]
+	var transition := ("Portals open after every Mage decides." if view.get("portal_after_reward", false)
+		else "Next: %s." % view.next_encounter_name)
+	var overlay := _combat_view.open_reward_overlay()
+	if _local_choice_revealed:
+		overlay.show_rewards("Victory · Card reward", "%s: choose a card or skip. %s\n%s" % [player, transition, progress],
+			view.reward_options, _submit_local_reward.bind(player, index), true,
+			Callable(), "", _deck_text(_local_run.deck_cards(player)))
+	else:
+		overlay.show_rewards("Victory · Card reward", "Pass controls to %s. %s\n%s" % [player, transition, progress],
+			[], Callable(), true, _show_local_choice.bind(player, index, CoopRunState.REWARD), "Show %s Reward" % player)
+
+
+func _remove_combat() -> void:
+	if _combat_view == null:
+		return
 	remove_child(_combat_view)
 	_combat_view.queue_free()
 	_combat_view = null
-	_render_panel()
 
 
 func _on_back_pressed() -> void:

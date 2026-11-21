@@ -27,13 +27,16 @@ func _run() -> void:
 	_pick("Gate Sentinel")
 	_check(_combat_text("%EnemyLabel").begins_with("Gate Sentinel") and "Attack for 7 damage" in _combat_text("%EnemyLabel"),
 		"the selected first route opens the configured combat")
-	_win_opening(2)
-	_check(_text("%Heading") == "Choose a card reward" and "HP 34/36" in _text("%RunStatus"),
-		"opening victory shows reward options and remaining HP")
-	var offer := _find_button(current_scene.get_node("%Choices"), "Shieldstrike")
+	var opening := current_scene.get_node("Combat")
+	await _win_opening(2)
+	var reward := opening.get("reward_overlay") as Control
+	_check(reward.is_visible_in_tree() and current_scene.get_node("Combat") == opening
+		and "HP 34/36" in _combat_text("%PlayerLabel"),
+		"opening victory automatically shows the reward above the same battlefield and remaining HP")
+	var offer := _find_button(reward.get_node("%RewardChoices"), "Shieldstrike")
 	_check(offer != null and "1 Mana" in offer.text and "Deal 8 damage." in offer.text,
 		"reward choices show the card's current cost and text")
-	_pick("Shieldstrike")
+	_press(offer, "take Shieldstrike")
 	_check(_text("%Heading") == "Ready for the boss" and "12 cards" in _text("%DeckTitle") and
 		"1 × Shieldstrike" in _text("%DeckList") and "Added Shieldstrike" in _text("%Message"),
 		"taking the reward visibly adds it to the run deck before the boss")
@@ -51,7 +54,7 @@ func _run() -> void:
 		_play("Basic Strike")
 	_combat_action("End Turn")
 	_play("Basic Strike")
-	_combat_action("Continue Run")
+	await process_frame
 	_check(_text("%Heading") == "Run Victory" and "HP 19/36" in _text("%RunStatus") and
 		"1 × Shieldstrike" in _text("%DeckList"), "run victory summarizes the surviving HP and upgraded deck")
 	await _return_to_menu()
@@ -59,20 +62,21 @@ func _run() -> void:
 	await _open_run()
 	_pick("Rift Stalker")
 	_check(_combat_text("%EnemyLabel").begins_with("Rift Stalker"), "the other route launches the Rift Stalker")
-	_win_opening(1)
-	_pick("Skip Reward")
+	await _win_opening(1)
+	reward = current_scene.get_node("Combat").get("reward_overlay") as Control
+	_press(reward.get_node("%SkipReward") as Button, "Skip Reward")
 	_check(_text("%Heading") == "Ready for the boss" and "Reward skipped" in _text("%Message") and
 		"11 cards" in _text("%DeckTitle") and "HP 31/36" in _text("%RunStatus"),
 		"skip preserves the starting deck and damage taken on the selected route")
 	_pick("Fight Citadel Warden")
-	_pass_until_defeat()
+	await _pass_until_defeat()
 	_check(_text("%Heading") == "Run Defeat" and "Citadel Warden" in _text("%Message") and
 		"HP 0/36" in _text("%RunStatus"), "boss defeat shows the run defeat screen")
 	await _return_to_menu()
 
 	await _open_run()
 	_pick("Gate Sentinel")
-	_pass_until_defeat()
+	await _pass_until_defeat()
 	_check(_text("%Heading") == "Run Defeat" and "Gate Sentinel" in _text("%Message") and
 		current_scene.get_node("%Choices").get_child_count() == 0, "opening defeat skips the reward and boss")
 	await _return_to_menu()
@@ -102,7 +106,7 @@ func _win_opening(second_turn_strikes: int) -> void:
 	_combat_action("End Turn")
 	for _strike in second_turn_strikes:
 		_play("Basic Strike")
-	_combat_action("Continue Run")
+	await process_frame
 
 
 func _pass_until_defeat() -> void:
@@ -110,7 +114,7 @@ func _pass_until_defeat() -> void:
 		if _combat_text("%TurnLabel") == "Defeat":
 			break
 		_combat_action("End Turn")
-	_combat_action("Continue Run")
+	await process_frame
 
 
 func _pick(prefix: String) -> void:

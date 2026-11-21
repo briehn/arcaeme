@@ -440,20 +440,23 @@ func _drive_reward(view: Dictionary) -> void:
 		var index := (_seat - 1) % (view.reward_options as Array).size()
 		_chosen_reward = view.reward_options[index].id
 		_reward_clicked = true
-		var button := _control("%RewardChoices").get_child(index) as Button
+		var button := _reward().get_node("%RewardChoices").get_child(index) as Button
 		button.pressed.emit()
 	else:
 		_reward_clicked = true
-		(_control("%SkipReward") as Button).pressed.emit()
+		(_reward().get_node("%SkipReward") as Button).pressed.emit()
 
 
 func _check_reward(view: Dictionary) -> bool:
-	var label: Label = current_scene.get_node("%RewardProgress")
-	var choices := _control("%RewardChoices")
-	var skip := _control("%SkipReward") as Button
-	if view.reward_ready < 0 or view.reward_ready >= _size or not _control("%RewardPanel").visible or \
-			_control("%CombatSlot").visible or "%d/%d" % [view.reward_ready, _size] not in label.text:
-		_fail("Reward progress or reward/combat panel visibility is incorrect.")
+	var overlay := _reward()
+	var label: Label = overlay.get_node("%RewardStatus")
+	var choices := overlay.get_node("%RewardChoices")
+	var skip := overlay.get_node("%SkipReward") as Button
+	if view.reward_ready < 0 or view.reward_ready >= _size or not overlay.is_visible_in_tree() or \
+			not _control("%CombatSlot").visible or _control("%RewardPanel").visible or \
+			not (_combat().get_node("%EndTurnButton") as Button).disabled or \
+			"%d/%d" % [view.reward_ready, _size] not in label.text:
+		_fail("Reward progress, persistent battlefield, or disabled combat controls are incorrect.")
 		return false
 	if view.reward_submitted:
 		if not view.reward_options.is_empty() or choices.get_child_count() != 0 or skip.is_visible_in_tree():
@@ -542,7 +545,8 @@ func _check_boss_start(view: Dictionary) -> bool:
 			view.run_deck_count != expected_deck_size or view.discard_count != 0 or \
 			view.hand.size() != mini(5, expected_deck_size) or view.hand.size() + view.draw_count != expected_deck_size or \
 			view.has("reward_options") or run.opening_encounters[0].enemy_name in "\n".join(view.log) or \
-			not _control("%CombatSlot").visible or _control("%RewardPanel").visible or stage_title not in stage_label.text:
+			not _control("%CombatSlot").visible or _control("%RewardPanel").visible or _reward().visible or \
+			_reward().get_node("%RewardChoices").get_child_count() != 0 or stage_title not in stage_label.text:
 		_fail("The fresh boss snapshot carried the wrong encounter ID, revision, deck, combat state or UI.")
 		return false
 	if not _check_hand_ids(view, expected_deck_size):
@@ -616,14 +620,18 @@ func _used_expansion_attack(log_lines: PackedStringArray) -> bool:
 func _report_disconnect() -> void:
 	var view := _session.snapshot
 	if _scenario not in ["lobby-disconnect", "reward-disconnect"] or "disconnected" not in _session.message or \
-			root.multiplayer.has_multiplayer_peer() or _session.can_submit() or _session.submit_end_turn() or \
-			_control("%CombatSlot").visible:
+			root.multiplayer.has_multiplayer_peer() or _session.can_submit() or _session.submit_end_turn():
 		_fail("Disconnect failed to release the transport or disable the run.")
 		return
-	if _scenario == "lobby-disconnect" and not view.is_empty() or \
+	if _scenario == "lobby-disconnect" and (not view.is_empty() or _control("%CombatSlot").visible) or \
 			_scenario == "reward-disconnect" and (not _reward_seen or view.run_stage != "reward" or \
 			view.reward_ready != 1 or _session.submit_reward("")):
 		_fail("Disconnect advanced the incomplete lobby or unresolved reward phase.")
+		return
+	if _scenario == "reward-disconnect" and (not _control("%CombatSlot").visible or _reward().visible
+			or _reward().get_node("%RewardChoices").get_child_count() != 0
+			or not (_combat().get_node("%EndTurnButton") as Button).disabled):
+		_fail("Reward disconnect must retain the disabled battlefield and clear private reward controls.")
 		return
 	_report(_scenario)
 
@@ -646,6 +654,10 @@ func _public_digest(view: Dictionary) -> String:
 
 func _combat() -> Node:
 	return _control("%CombatSlot").get_node("Combat")
+
+
+func _reward() -> Control:
+	return _combat().get("reward_overlay") as Control
 
 
 func _control(path: NodePath) -> Control:
