@@ -10,7 +10,6 @@ const REFERENCE_SURFACE_SIDE := 348.0
 const BRUSH_OUTLINE := Color("#fff4dc")
 const BRUSH_EDGE := Color("#1d0c2b")
 const BRUSH_FILL := Color(1.0, 0.86, 0.63, 0.24)
-const SURFACE_COLOR := Color("#140e21")
 const GUIDE_HEIGHT_FRACTION := 0.76
 const GUIDE_WIDTH_FRACTION := 0.86
 const MIN_POINT_DISTANCE_SQUARED := 0.000004
@@ -226,7 +225,6 @@ func _ink_points(stroke: PackedVector2Array) -> PackedVector2Array:
 
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), SURFACE_COLOR)
 	var guide_width := clampf(_surface().size.x * 0.009, 3.0, 6.0)
 	for guide_stroke in _guide:
 		var stroke := _local_points(guide_stroke)

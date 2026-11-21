@@ -22,6 +22,8 @@ signal drawing_attempt_finished(seat: int, quality: String, reason: String, elap
 signal network_card_requested(copy_id: int, target_id: StringName)
 signal network_end_turn_requested
 signal network_undo_ready_requested
+signal network_drawing_submitted(strokes: Array[PackedVector2Array])
+signal network_cast_canceled
 
 @export var encounter: EncounterData
 @export var player_ids: Array[StringName] = [PLAYER_ID]
@@ -49,6 +51,10 @@ var _card_buttons: Dictionary[int, Button] = {}
 var _shown_log_lines := 0
 var _run_title: String
 var _network_mode := false
+var _network_overlay_parent: Control
+var _network_cast_token := ""
+var _network_deadline_ms := 0
+var _network_booster_primed := false
 var _displayed_encounter := -1
 var _snapshot: Dictionary = {}
 var _input_allowed := false
@@ -66,20 +72,28 @@ func configure_run(combat: CombatState, run_encounter: EncounterData, title: Str
 	_run_title = title
 
 
-func configure_network() -> void:
+func configure_network(overlay_parent: Control = null) -> void:
 	_network_mode = true
+	_network_overlay_parent = overlay_parent
 
 
-func display_network_snapshot(snapshot: Dictionary, input_allowed: bool) -> void:
+func display_network_snapshot(snapshot: Dictionary, input_allowed: bool, casting_allowed := true) -> void:
 	var encounter_id: int = snapshot.get("encounter_id", 0)
 	if encounter_id != _displayed_encounter:
 		clear_network_view()
 		_displayed_encounter = encounter_id
 	%TitleLabel.visible = not snapshot.has("run_stage")
 	_render_snapshot(snapshot, input_allowed)
+	if casting_allowed:
+		_sync_network_cast(snapshot)
+	else:
+		clear_network_cast()
 
 
 func clear_network_view() -> void:
+	clear_network_cast()
+	spell_feedback.hide()
+	_network_booster_primed = false
 	combat_log.clear()
 	_shown_log_lines = 0
 	_displayed_encounter = -1
@@ -459,8 +473,12 @@ func _setup_spell_drawing() -> void:
 	_reset_spell_feedback()
 	if bypass_drawing:
 		return
+	_create_spell_panel(self)
+
+
+func _create_spell_panel(overlay_parent: Control) -> void:
 	_spell_panel = SPELL_DRAWING_PANEL.instantiate()
-	add_child(_spell_panel)
+	overlay_parent.add_child(_spell_panel)
 	_spell_panel.drawing_submitted.connect(_on_drawing_submitted)
 	_spell_panel.cast_surface_ready.connect(_on_cast_surface_ready)
 	_spell_panel.cast_canceled.connect(_on_cast_canceled)
@@ -478,12 +496,18 @@ func _reset_spell_feedback() -> void:
 
 
 func _on_cast_surface_ready() -> void:
+	if _network_mode:
+		_spell_panel.start_timer(_network_deadline_ms)
+		return
 	var deadline := _state.start_spell_cast_clock(_selected_player_id, Time.get_ticks_msec())
 	if deadline >= 0:
 		_spell_panel.start_timer(deadline)
 
 
 func _on_drawing_submitted(strokes: Array[PackedVector2Array]) -> void:
+	if _network_mode:
+		network_drawing_submitted.emit(strokes)
+		return
 	_show_cast_result(_state.submit_spell_cast(_selected_player_id, strokes, Time.get_ticks_msec()), false)
 
 
@@ -507,17 +531,23 @@ func _show_cast_result(result: CombatState.CastResult, timed_out: bool) -> void:
 
 
 func _on_cast_canceled() -> void:
+	if _network_mode:
+		network_cast_canceled.emit()
+		return
 	if _state.cancel_spell_cast(_selected_player_id):
 		_report_drawing_attempt("", "canceled")
 		_finish_cast("Cast canceled · Card and Mana kept.")
 
 
 func _on_cast_expired(strokes: Array[PackedVector2Array]) -> void:
+	if _network_mode:
+		network_drawing_submitted.emit(strokes)
+		return
 	_show_cast_result(_state.expire_spell_cast(_selected_player_id, strokes, Time.get_ticks_msec()), true)
 
 
 func _exit_tree() -> void:
-	if _casting_copy >= 0:
+	if not _network_mode and _casting_copy >= 0:
 		_state.cancel_spell_cast(_selected_player_id)
 		_report_drawing_attempt("", "canceled")
 		_casting_copy = -1
@@ -531,16 +561,101 @@ func _report_drawing_attempt(quality: String, reason: String) -> void:
 func _finish_cast(message: String, color := Color("#edc0b3")) -> void:
 	var copy_id := _casting_copy
 	_casting_copy = -1
+	_set_spell_feedback(message, color)
+	_render()
+	_restore_cast_focus(copy_id)
+
+
+func _set_spell_feedback(message: String, color: Color) -> void:
 	spell_feedback.text = message
 	spell_feedback.add_theme_color_override(&"font_color", color)
-	_render()
+
+
+func _restore_cast_focus(copy_id: int) -> void:
 	var button: Button = _card_buttons.get(copy_id)
 	if button != null and not button.disabled:
 		button.grab_focus()
 	elif not end_turn_button.disabled:
 		end_turn_button.grab_focus()
-	else:
+	elif %BackButton.is_visible_in_tree():
 		%BackButton.grab_focus()
+
+
+func _sync_network_cast(snapshot: Dictionary) -> void:
+	if not snapshot.get("casting_enabled", false):
+		clear_network_cast()
+		spell_feedback.hide()
+		return
+	var primed: bool = snapshot.get("booster_primed", false)
+	if not spell_feedback.visible or primed != _network_booster_primed:
+		_network_booster_primed = primed
+		spell_feedback.remove_theme_color_override(&"font_color")
+		spell_feedback.text = "Booster ready · Trace the connected extra stroke to use its bonus." if primed \
+			else "Spell Drawing (Prototype) · Battle Mage spells use runes. Boosters are instant."
+		spell_feedback.show()
+	var cast: Dictionary = snapshot.get("cast", {})
+	var token: String = cast.get("token", "")
+	if token == _network_cast_token:
+		return
+	if token.is_empty():
+		var previous_copy := _casting_copy
+		clear_network_cast()
+		_restore_cast_focus(previous_copy)
+		return
+	clear_network_cast()
+	if _spell_panel == null:
+		_create_spell_panel(_network_overlay_parent if _network_overlay_parent != null else self)
+		var time_label: Label = _spell_panel.get_node("%TimeLabel")
+		time_label.tooltip_text = "When time runs out, your strokes are sent to the host for evaluation."
+	_network_cast_token = token
+	_network_deadline_ms = Time.get_ticks_msec() + int(cast.remaining_ms)
+	_casting_copy = cast.copy
+	var guide: Array[PackedVector2Array] = []
+	guide.assign(cast.guide)
+	var rune_name := String(cast.rune_name) + (" · extra stroke" if cast.boosted else "")
+	_spell_panel.open_cast(cast.card_name, rune_name, guide, _network_cast_context(snapshot, StringName(cast.target)))
+
+
+func _network_cast_context(snapshot: Dictionary, target_id: StringName) -> String:
+	var context := ""
+	for caster: Dictionary in snapshot.players:
+		if caster.id == snapshot.viewer:
+			context = "%s · %d Mana · %d/%d HP" % [caster.id, caster.mana, caster.hp, caster.max_hp]
+			break
+	for enemy: Dictionary in snapshot.enemies:
+		if StringName(enemy.id) == target_id:
+			var button: Button = _enemy_buttons.get(target_id)
+			var display_name := button.text.get_slice("\n", 0) if button != null else String(enemy.name)
+			return context + "\n%s · %d/%d HP" % [display_name, enemy.hp, enemy.max_hp]
+	return context
+
+
+func clear_network_cast() -> void:
+	if _network_cast_token.is_empty():
+		return
+	_network_cast_token = ""
+	_network_deadline_ms = 0
+	_casting_copy = -1
+	_spell_panel.close_cast()
+
+
+func show_network_cast_result(feedback: Dictionary) -> void:
+	if not spell_feedback.visible:
+		return
+	var message := "Cast no longer available · Card and Mana kept."
+	var color := Color("#edc0b3")
+	match feedback.get("status", ""):
+		"success":
+			var quality: String = feedback.quality
+			message = "%s cast · %d%% base power." % [quality, feedback.power_percent]
+			color = CAST_FEEDBACK_COLORS[quality]
+		"canceled":
+			message = "Cast canceled · Card and Mana kept."
+		"misdrawn":
+			message = "Rune unrecognized · Card and Mana kept."
+		"expired":
+			message = "Time up · Card and Mana kept."
+	_set_spell_feedback(message, color)
 
 
 func _input(event: InputEvent) -> void:

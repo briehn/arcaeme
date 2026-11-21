@@ -3,7 +3,7 @@ param(
     [ValidateRange(1024, 65530)] [int]$BasePort = 27100,
     [ValidateRange(2, 4)] [int[]]$PartySizes = @(2, 3, 4),
     [switch]$Native,
-    [ValidateSet('statuses', 'modifiers', 'enemies', 'enemy-actions', 'multi-enemy', 'ready', 'multi-enemy-run', 'major-arcana', 'portal-run', 'battle-mage-pool')] [string]$Playtest = 'statuses',
+    [ValidateSet('statuses', 'modifiers', 'enemies', 'enemy-actions', 'multi-enemy', 'ready', 'multi-enemy-run', 'major-arcana', 'portal-run', 'battle-mage-pool', 'spell-casting', 'spell-casting-run')] [string]$Playtest = 'statuses',
     [ValidateSet('Buff', 'Block')] [string]$EnemyActionFixture = 'Buff',
     [ValidateSet('TwoSlimes', 'GoblinTreant', 'ThreeEnemies', 'Run', 'Defeat')]
     [string]$MultiEnemyFixture = 'ThreeEnemies'
@@ -22,6 +22,8 @@ $fixtureScript = switch ($Playtest) {
     'major-arcana' { 'network_multi_enemy_run_integration.gd' }
     'portal-run' { 'network_multi_enemy_run_integration.gd' }
     'battle-mage-pool' { 'network_multi_enemy_run_integration.gd' }
+    'spell-casting' { 'network_spell_casting_integration.gd' }
+    'spell-casting-run' { 'network_spell_casting_integration.gd' }
     default { 'network_status_integration.gd' }
 }
 $logFolder = Join-Path $env:TEMP ("arcaeme-network-$Playtest-test-" + [Guid]::NewGuid().ToString('N'))
@@ -39,6 +41,7 @@ function Start-Participant([int]$Port, [int]$Size, [int]$Seat, [string]$ReleaseP
     if ($Playtest -eq 'major-arcana') { $arguments += 'MajorArcana' }
     if ($Playtest -eq 'portal-run') { $arguments += 'Portals' }
     if ($Playtest -eq 'battle-mage-pool') { $arguments += 'BattleMagePool' }
+    if ($Playtest -eq 'spell-casting-run') { $arguments += 'ShortRun' }
     $process = Start-Process -FilePath $engine -ArgumentList $arguments -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput "$prefix.stdout" -RedirectStandardError "$prefix.stderr"
     return @{ Process = $process; Output = "$prefix.stdout"; Errors = "$prefix.stderr" }
@@ -116,7 +119,9 @@ function Test-Party([int]$Size, [int]$Port) {
         Write-Output ("$Size-player $Playtest ($mode) passed · " + $baseline.Substring(7) + $poolSummary)
     } finally {
         foreach ($participant in $participants) {
-            if (-not $participant.Process.HasExited) { Stop-Process -Id $participant.Process.Id }
+            if (-not $participant.Process.HasExited) {
+                Stop-Process -Id $participant.Process.Id -ErrorAction SilentlyContinue
+            }
         }
     }
 }

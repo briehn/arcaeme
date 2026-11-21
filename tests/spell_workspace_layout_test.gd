@@ -47,6 +47,8 @@ func _run() -> void:
 		_test_all_guides(canvas, normalized_references)
 		canvas.set_guide(boosted)
 		_print_measurements(panel, canvas, boosted)
+		if native:
+			await _test_backdrop(panel, canvas)
 		await _test_brush(canvas, native)
 		panel.close_cast()
 		_check(not canvas._brush_overlay.visible and canvas.completed_strokes(true).is_empty(),
@@ -124,6 +126,22 @@ func _test_all_guides(canvas: RuneCanvas, normalized_references: Dictionary) -> 
 				"%s fitted geometry still matches its template without score loss" % label)
 
 
+func _test_backdrop(panel: DrawingPanel, canvas: RuneCanvas) -> void:
+	var backing := ColorRect.new()
+	backing.color = Color.WHITE
+	backing.size = Vector2(_viewport.size)
+	backing.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_viewport.add_child(backing)
+	_viewport.move_child(backing, panel.get_index())
+	var frame := await _frame()
+	var rect := canvas.get_global_rect()
+	var inside := frame.get_pixelv(Vector2i(rect.position + Vector2(6, rect.size.y / 2)))
+	var outside := frame.get_pixelv(Vector2i(rect.position + Vector2(-6, rect.size.y / 2)))
+	_check(inside.is_equal_approx(outside) and inside.get_luminance() < 0.2,
+		"the same dimmed backdrop shows through both sides of the canvas edge (%s vs %s)" % [inside, outside])
+	backing.queue_free()
+
+
 func _test_brush(canvas: RuneCanvas, native: bool) -> void:
 	var surface := canvas._surface()
 	var transform := canvas.get_global_transform_with_canvas()
@@ -158,8 +176,8 @@ func _test_brush(canvas: RuneCanvas, native: bool) -> void:
 	if native:
 		_pointer(transform * ink_tip)
 		var active := await _frame()
-		if "--capture" in OS.get_cmdline_user_args() and _viewport.size.x in [960, 1280]:
-			var path := OS.get_environment("TEMP").path_join("arcaeme-m20b-workspace-%dx%d.png" % [
+		if "--capture" in OS.get_cmdline_user_args():
+			var path := OS.get_environment("TEMP").path_join("arcaeme-casting-workspace-%dx%d.png" % [
 				_viewport.size.x, _viewport.size.y])
 			_check(active.save_png(path) == OK, "native workspace capture saved")
 			print("WORKSPACE_CAPTURE ", path)
@@ -167,6 +185,8 @@ func _test_brush(canvas: RuneCanvas, native: bool) -> void:
 		var ink := await _frame()
 		var edge_delta := _rim_delta(ink, active, transform * ink_tip, radius)
 		_check(edge_delta > 0.35, "the rendered rim remains distinct above drawn ink (%.2f)" % edge_delta)
+		var ink_delta := _pixel_delta(clean, ink, Vector2i(transform * below.lerp(ink_tip, 0.5)))
+		_check(ink_delta > 0.45, "the rendered ink contrasts with the dimmed board (%.2f)" % ink_delta)
 	_pointer(Vector2(2, 2))
 	_check(not brush.visible and canvas.completed_strokes().size() == 1,
 		"leaving hides the footprint and preserves the recorded stroke")

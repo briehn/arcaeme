@@ -5,9 +5,12 @@ const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const CoopRunState = preload("res://scripts/run/coop_run_state.gd")
 const PortalRoute = preload("res://scripts/run/portal_route.gd")
+const SpellDrawingSettings = preload("res://scripts/combat/spell_drawing_settings.gd")
+const StrokePayload = preload("res://scripts/network/rune_stroke_payload.gd")
 
 signal changed
 signal command_result(sequence: int, result: int)
+signal spell_cast_result(feedback: Dictionary)
 
 enum Status { IDLE, HOSTING, JOINING, WAITING, ACTIVE, DISCONNECTED }
 
@@ -29,6 +32,7 @@ var local_player := ""
 var connected_players := PackedStringArray()
 var message := "Choose Host or Join. Both instances must use the same UDP port."
 var snapshot: Dictionary = {}
+var spell_drawing: SpellDrawingSettings
 
 var _api: MultiplayerAPI
 var _transport: ENetMultiplayerPeer
@@ -38,6 +42,8 @@ var _join_timer: Timer
 var _next_sequence := 0
 var _pending_sequence := 0
 var _hosting_short_run := false
+var _host_spell_drawing: SpellDrawingSettings
+var _request_sent_ms := 0
 
 
 func _ready() -> void:
@@ -66,11 +72,19 @@ func join(port: int = DEFAULT_PORT) -> Error:
 
 
 func can_submit() -> bool:
-	return status == Status.ACTIVE and _pending_sequence == 0
+	return status == Status.ACTIVE and _pending_sequence == 0 and not snapshot.has("cast")
 
 
 func submit_card(copy_id: int, target_id: StringName = &"") -> bool:
 	return _submit(Authority.Command.PLAY_CARD, copy_id, "", target_id)
+
+
+func submit_spell_cast(strokes: Array[PackedVector2Array]) -> bool:
+	return _submit(Authority.Command.SUBMIT_CAST, -1, "", &"", StrokePayload.encode(strokes))
+
+
+func cancel_spell_cast() -> bool:
+	return _submit(Authority.Command.CANCEL_CAST)
 
 
 func submit_end_turn() -> bool:
@@ -106,6 +120,7 @@ func _open(port: int, as_host: bool, seats: int, short_run := false) -> Error:
 		return ERR_INVALID_PARAMETER
 	hosting = as_host
 	_hosting_short_run = hosting and short_run
+	_host_spell_drawing = spell_drawing if hosting else null
 	party_size = 0
 	local_player = ""
 	connected_players.clear()
@@ -115,7 +130,7 @@ func _open(port: int, as_host: bool, seats: int, short_run := false) -> Error:
 	_next_sequence = 0
 	_pending_sequence = 0
 	if hosting and not _valid_host_setup(seats):
-		_disconnect("Check the encounter, the short-run reward pool, and distinct player IDs for 2–4 seats.")
+		_disconnect("Check the encounter, reward pool, rune support, and distinct player IDs for 2–4 seats.")
 		return ERR_INVALID_PARAMETER
 	var peer := ENetMultiplayerPeer.new()
 	var error: Error
@@ -158,6 +173,13 @@ func _valid_host_setup(seats: int) -> bool:
 		return false
 	if _hosting_short_run and run_data.portal_enabled and run_data.opening_encounters[0].enemy_id != PortalRoute.START:
 		return false
+	if _host_spell_drawing != null:
+		var playable := run_data.starting_deck + run_data.eligible_rewards(RunData.BATTLE_MAGE) \
+			if _hosting_short_run else encounter.test_deck
+		for card in playable:
+			if card == null or (not card.is_spell_booster and (card.rune_template == null
+					or card.rune_template.strokes.is_empty() or card.rune_template.cast_time_ms <= 0)):
+				return false
 	var selected := player_ids.slice(0, seats)
 	for player_id in selected:
 		if player_id == &"" or selected.count(player_id) != 1:
@@ -183,7 +205,8 @@ func _on_peer_connected(peer_id: int) -> void:
 				_disconnect("Could not generate private run offers.")
 				return
 			offer_seed = entropy.decode_s64(0)
-		_authority = Authority.new(encounter, _assignments, run_data if _hosting_short_run else null, offer_seed)
+		_authority = Authority.new(encounter, _assignments, run_data if _hosting_short_run else null,
+			offer_seed, _host_spell_drawing)
 		_publish(0, 0)
 
 
@@ -243,6 +266,7 @@ func _disconnect(reason: String) -> void:
 	_authority = null
 	_assignments.clear()
 	connected_players.clear()
+	snapshot.erase("cast")
 	_pending_sequence = 0
 	status = Status.DISCONNECTED
 	message = reason
@@ -259,8 +283,10 @@ func _close_transport() -> void:
 		peer.close()
 
 
-func _submit(kind: Authority.Command, copy_id: int = -1, choice_id := "", target_id: StringName = &"") -> bool:
-	if not can_submit():
+func _submit(kind: Authority.Command, copy_id: int = -1, choice_id := "", target_id: StringName = &"",
+		strokes := PackedByteArray()) -> bool:
+	var finishing_cast := kind in [Authority.Command.SUBMIT_CAST, Authority.Command.CANCEL_CAST]
+	if status != Status.ACTIVE or _pending_sequence != 0 or finishing_cast != snapshot.has("cast"):
 		return false
 	if snapshot.get("run_stage") == CoopRunState.ARCANA and kind != Authority.Command.ARCANA:
 		return false
@@ -283,6 +309,11 @@ func _submit(kind: Authority.Command, copy_id: int = -1, choice_id := "", target
 			request["copy"] = copy_id
 			if target_id != &"":
 				request["target"] = String(target_id)
+		elif finishing_cast:
+			request["token"] = snapshot["cast"]["token"]
+			if kind == Authority.Command.SUBMIT_CAST:
+				request["strokes"] = strokes
+	_request_sent_ms = Time.get_ticks_msec()
 	if hosting:
 		_handle_command(SERVER_ID, request)
 	else:
@@ -308,7 +339,8 @@ func _handle_command(peer_id: int, request: Variant) -> void:
 	var sequence := 0
 	if request is Dictionary and request.get("sequence") is int:
 		sequence = request["sequence"]
-	if result == Authority.Result.ACCEPTED:
+	if result == Authority.Result.ACCEPTED and request["kind"] != Authority.Command.CANCEL_CAST \
+			and not (request["kind"] == Authority.Command.PLAY_CARD and _authority.has_pending_cast(peer_id)):
 		_publish(peer_id, sequence)
 	else:
 		_deliver(peer_id, sequence, result)
@@ -321,40 +353,55 @@ func _publish(command_peer: int, sequence: int) -> void:
 
 func _deliver(peer_id: int, sequence: int, result: int) -> void:
 	var view := _authority.snapshot_for(peer_id)
+	var feedback := _authority.take_cast_feedback(peer_id)
 	if peer_id == SERVER_ID:
-		_apply_snapshot(view, sequence, result)
+		_apply_snapshot(view, sequence, result, feedback)
 	else:
-		_receive_snapshot.rpc_id(peer_id, view, sequence, result)
+		_receive_snapshot.rpc_id(peer_id, view, sequence, result, feedback)
 
 
 @rpc("authority", "call_remote", "reliable")
-func _receive_snapshot(view: Dictionary, sequence: int, result: int) -> void:
+func _receive_snapshot(view: Dictionary, sequence: int, result: int, feedback: Dictionary) -> void:
 	if _from_host() and status in [Status.WAITING, Status.ACTIVE] and view.get("viewer") == local_player:
-		_apply_snapshot(view, sequence, result)
+		_apply_snapshot(view, sequence, result, feedback)
 
 
 func _from_host() -> bool:
 	return not hosting and _transport != null and _api.get_remote_sender_id() == SERVER_ID
 
 
-func _apply_snapshot(view: Dictionary, sequence: int, result: int) -> void:
+func _apply_snapshot(view: Dictionary, sequence: int, result: int, feedback: Dictionary = {}) -> void:
 	# Run revisions include Arcana and rewards, while combat revisions restart each encounter.
 	if not snapshot.is_empty():
 		var incoming_revision: int = view.get("run_revision", view["revision"])
 		var current_revision: int = snapshot.get("run_revision", snapshot["revision"])
 		if view.get("encounter_id", 0) < snapshot.get("encounter_id", 0) or incoming_revision < current_revision:
 			return
+	if view.has("cast") and not hosting and sequence != 0 and sequence == _pending_sequence:
+		# Estimate one leg from this command's turnaround. The host remains the clock of record.
+		var estimate := mini(150, (Time.get_ticks_msec() - _request_sent_ms) >> 1)
+		view["cast"]["remaining_ms"] = maxi(0, int(view["cast"]["remaining_ms"]) - estimate)
 	snapshot = view
 	_join_timer.stop()
 	status = Status.ACTIVE
 	if sequence == _pending_sequence:
 		_pending_sequence = 0
 	message = _connected_message()
-	if result != Authority.Result.ACCEPTED:
+	if result != Authority.Result.ACCEPTED and feedback.is_empty():
 		message += " · Action rejected (%s)" % Authority.Result.keys()[result].to_lower().replace("_", " ")
 	if sequence != 0:
 		command_result.emit(sequence, result)
 	changed.emit()
+	if not feedback.is_empty():
+		spell_cast_result.emit(feedback)
+
+
+func _process(_delta: float) -> void:
+	if _authority == null:
+		return
+	for peer_id in _authority.expire_casts(Time.get_ticks_msec()):
+		if _authority != null:
+			_deliver(peer_id, 0, Authority.Result.ACCEPTED)
 
 
 func _connected_message() -> String:

@@ -15,12 +15,14 @@ const STATUS_ENCOUNTER = preload("res://resources/prototype/status_playtest/enco
 const MODIFIER_ENCOUNTER = preload("res://resources/prototype/modifier_playtest/encounter.tres")
 const ENEMY_VARIETY_RUN = preload("res://resources/prototype/enemy_variety_run.tres")
 const MULTI_ENEMY_RUN = preload("res://resources/prototype/multi_enemy_run.tres")
+const SPELL_DRAWING = preload("res://resources/prototype/spell_drawing_settings.tres")
 
 @onready var session: NetworkSession = $Session
 @onready var setup_controls: HFlowContainer = %Controls
 @onready var port_field: SpinBox = %Port
 @onready var party_size_field: OptionButton = %PartySize
 @onready var short_run_field: CheckBox = %ShortRun
+@onready var spell_drawing_field: CheckBox = %SpellDrawing
 @onready var enemy_variety_run_field: CheckBox = %EnemyVarietyRun
 @onready var multi_enemy_run_field: CheckBox = %MultiEnemyRun
 @onready var major_arcana_field: CheckBox = %MajorArcana
@@ -64,12 +66,15 @@ func _ready() -> void:
 	enemy_playtest_field.item_selected.connect(_on_enemy_playtest_selected)
 	card_expansion_field.toggled.connect(_on_card_expansion_toggled)
 	_combat = COMBAT_SCENE.instantiate()
-	_combat.configure_network()
+	_combat.configure_network(self)
 	_combat.network_card_requested.connect(session.submit_card)
 	_combat.network_end_turn_requested.connect(session.submit_end_turn)
 	_combat.network_undo_ready_requested.connect(session.submit_undo_ready)
+	_combat.network_drawing_submitted.connect(session.submit_spell_cast)
+	_combat.network_cast_canceled.connect(session.cancel_spell_cast)
 	combat_slot.add_child(_combat)
 	session.changed.connect(_refresh)
+	session.spell_cast_result.connect(_combat.show_network_cast_result)
 	_refresh()
 
 
@@ -93,6 +98,7 @@ func _refresh() -> void:
 	modifier_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
 	enemy_playtest_field.disabled = connected_or_waiting or short_run_field.button_pressed
 	_refresh_card_expansion_option(connected_or_waiting)
+	_refresh_spell_drawing_option(connected_or_waiting)
 	roster_label.visible = session.party_size > 0
 	if roster_label.visible:
 		roster_label.text = "%d/%d connected" % [session.connected_players.size(), session.party_size]
@@ -140,6 +146,7 @@ func _refresh_session_view() -> void:
 			stage_title = encounter_title
 	run_stage_label.text = "%s  /  %s" % [run_title, stage_title]
 	if stage in [CoopRunState.REWARD, CoopRunState.ARCANA, CoopRunState.PORTAL]:
+		_combat.clear_network_cast()
 		combat_slot.hide()
 		var opening_panel := stage != _choice_stage
 		if opening_panel:
@@ -160,7 +167,8 @@ func _refresh_session_view() -> void:
 		combat_slot.hide()
 	else:
 		var run_finished := stage == CoopRunState.VICTORY or stage == CoopRunState.DEFEAT
-		_combat.display_network_snapshot(session.snapshot, session.can_submit() and not run_finished)
+		_combat.display_network_snapshot(session.snapshot, session.can_submit() and not run_finished,
+			session.status == NetworkSession.Status.ACTIVE and not run_finished)
 		combat_slot.show()
 
 
@@ -348,8 +356,16 @@ func _refresh_card_expansion_option(locked := false) -> void:
 	card_expansion_field.disabled = locked or not available
 
 
+func _refresh_spell_drawing_option(locked := false) -> void:
+	var available := not (status_playtest_field.button_pressed or modifier_playtest_field.button_pressed)
+	if not available:
+		spell_drawing_field.set_pressed_no_signal(false)
+	spell_drawing_field.disabled = locked or not available
+
+
 func _select_encounter_fixture() -> void:
 	_refresh_card_expansion_option()
+	_refresh_spell_drawing_option()
 	if status_playtest_field.button_pressed:
 		session.encounter = STATUS_ENCOUNTER
 	elif modifier_playtest_field.button_pressed:
@@ -363,6 +379,7 @@ func _select_encounter_fixture() -> void:
 
 func _on_host_pressed() -> void:
 	var party_size := party_size_field.get_selected_id()
+	session.spell_drawing = SPELL_DRAWING if spell_drawing_field.button_pressed else null
 	if enemy_variety_run_field.button_pressed:
 		var variant := pacing_variant_field.selected_variant()
 		session.run_data = ENEMY_VARIETY_RUN if variant == PacingExperiment.VariantKind.BASELINE \

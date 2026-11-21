@@ -37,13 +37,15 @@ var _offer_seed: Variant
 var _rng := RandomNumberGenerator.new()
 var _spell_drawing: SpellDrawingSettings
 var _bypass_drawing: bool
+var _parallel_casts: bool
 
 
 func _init(data: RunData, player_ids: Array[StringName], offer_seed: Variant = null,
-		spell_drawing: SpellDrawingSettings = null, bypass_drawing := false) -> void:
+		spell_drawing: SpellDrawingSettings = null, bypass_drawing := false, parallel_casts := false) -> void:
 	_data = data
 	_spell_drawing = spell_drawing
 	_bypass_drawing = bypass_drawing
+	_parallel_casts = parallel_casts
 	_player_ids = player_ids.duplicate()
 	_rng.seed = data.run_seed
 	_offer_seed = offer_seed
@@ -201,7 +203,7 @@ func _start_encounter(definition: EncounterData) -> void:
 	active_encounter.player_max_hp = _data.player_max_hp
 	active_encounter.shuffle_seed = _rng.randi()
 	active_combat = CombatState.new(active_encounter, active_encounter.shuffle_seed,
-		_player_ids, -1, _decks, _current_hps, _arcana_choices, _spell_drawing, _bypass_drawing)
+		_player_ids, -1, _decks, _current_hps, _arcana_choices, _spell_drawing, _bypass_drawing, _parallel_casts)
 	_reward_ready = 0
 	_portal_choices.clear()
 	encounter_id += 1

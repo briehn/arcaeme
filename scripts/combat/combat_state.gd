@@ -45,7 +45,6 @@ class PlayerState:
 
 
 class PendingCast:
-	var player_id: StringName
 	var copy_id: int
 	var target_id: StringName
 	var deadline_ms := -1
@@ -85,16 +84,18 @@ var _cards: Array[CardData] = []
 var _rng := RandomNumberGenerator.new()
 var _spell_drawing: SpellDrawingSettings
 var _bypass_drawing := false
-var _pending_cast: PendingCast
+var _parallel_casts := false
+var _pending_casts: Dictionary[StringName, PendingCast] = {}
 
 
 func _init(encounter: EncounterData, encounter_seed: int, player_ids: Array[StringName], starting_hp := -1,
 		player_decks: Dictionary[StringName, Array] = {}, player_hps: Dictionary[StringName, int] = {},
 		arcana_by_player: Dictionary[StringName, StringName] = {}, spell_drawing: SpellDrawingSettings = null,
-		bypass_drawing := false) -> void:
+		bypass_drawing := false, parallel_casts := false) -> void:
 	assert(not player_ids.is_empty(), "Combat requires at least one player.")
 	_spell_drawing = spell_drawing
 	_bypass_drawing = bypass_drawing
+	_parallel_casts = parallel_casts
 	shuffle_seed = encounter_seed
 	_rng.seed = shuffle_seed
 	var definitions := encounter.enemies
@@ -163,8 +164,16 @@ func enemy_attack_damage() -> int:
 
 
 func can_play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bool:
+	return not _casting_blocks_actions(player_id) and _card_is_legal(player_id, copy_id, target_id)
+
+
+func _casting_blocks_actions(player_id: StringName) -> bool:
+	return _pending_casts.has(player_id) if _parallel_casts else not _pending_casts.is_empty()
+
+
+func _card_is_legal(player_id: StringName, copy_id: int, target_id: StringName) -> bool:
 	var player: PlayerState = players.get(player_id)
-	if _pending_cast != null or not _can_act(player) or not player.hand.has(copy_id):
+	if not _can_act(player) or not player.hand.has(copy_id):
 		return false
 	var card := card_data(copy_id)
 	if player.mana < card.mana_cost:
@@ -182,7 +191,7 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 		return false
 	var player := players[player_id]
 	var card := card_data(copy_id)
-	if _spell_drawing != null and card.rune_template != null:
+	if _spell_drawing != null and card.rune_template != null and not card.is_spell_booster:
 		var boosted := player.spell_booster_primed and card.rune_template.booster_stroke.size() >= 2
 		var power := 100 + (_spell_drawing.booster_bonus_percent if boosted else 0)
 		if boosted:
@@ -195,7 +204,7 @@ func play_card(player_id: StringName, copy_id: int, target_id: StringName) -> bo
 
 func requires_rune(copy_id: int) -> bool:
 	return (_spell_drawing != null and not _bypass_drawing and copy_id >= 0 and copy_id < _cards.size()
-		and card_data(copy_id).rune_template != null)
+		and card_data(copy_id).rune_template != null and not card_data(copy_id).is_spell_booster)
 
 
 func begin_spell_cast(player_id: StringName, copy_id: int, target_id: StringName) -> Dictionary:
@@ -204,14 +213,13 @@ func begin_spell_cast(player_id: StringName, copy_id: int, target_id: StringName
 	var card := card_data(copy_id)
 	var template := card.rune_template
 	var cast := PendingCast.new()
-	cast.player_id = player_id
 	cast.copy_id = copy_id
 	cast.target_id = target_id
 	cast.guide = template.strokes.duplicate()
 	cast.boosted = players[player_id].spell_booster_primed and template.booster_stroke.size() >= 2
 	if cast.boosted:
 		cast.guide.append(template.booster_stroke)
-	_pending_cast = cast
+	_pending_casts[player_id] = cast
 	var display_guide: Array[PackedVector2Array] = []
 	for stroke in cast.guide:
 		display_guide.append(stroke.duplicate())
@@ -220,19 +228,25 @@ func begin_spell_cast(player_id: StringName, copy_id: int, target_id: StringName
 
 
 func start_spell_cast_clock(player_id: StringName, now_ms: int) -> int:
-	if _pending_cast == null or _pending_cast.player_id != player_id or _pending_cast.deadline_ms >= 0:
+	var cast: PendingCast = _pending_casts.get(player_id)
+	if cast == null or cast.deadline_ms >= 0:
 		return -1
-	var template := card_data(_pending_cast.copy_id).rune_template
-	_pending_cast.deadline_ms = now_ms + template.cast_time_ms
-	return _pending_cast.deadline_ms
+	var template := card_data(cast.copy_id).rune_template
+	cast.deadline_ms = now_ms + template.cast_time_ms
+	return cast.deadline_ms
+
+
+func is_spell_cast_valid(player_id: StringName) -> bool:
+	var cast: PendingCast = _pending_casts.get(player_id)
+	return cast != null and _card_is_legal(player_id, cast.copy_id, cast.target_id)
 
 
 func submit_spell_cast(player_id: StringName, strokes: Array[PackedVector2Array], now_ms: int) -> CastResult:
-	if _pending_cast == null or _pending_cast.player_id != player_id or _pending_cast.deadline_ms < 0:
+	var cast: PendingCast = _pending_casts.get(player_id)
+	if cast == null or cast.deadline_ms < 0:
 		return CastResult.NO_CAST
-	var cast := _pending_cast
-	_pending_cast = null
-	if not can_play_card(player_id, cast.copy_id, cast.target_id):
+	_pending_casts.erase(player_id)
+	if not _card_is_legal(player_id, cast.copy_id, cast.target_id):
 		return CastResult.INVALID
 	var boosted := cast.boosted and strokes.size() == cast.guide.size()
 	var base_guide := card_data(cast.copy_id).rune_template.strokes
@@ -258,16 +272,14 @@ func _match_spell_rune(guide: Array[PackedVector2Array], strokes: Array[PackedVe
 
 
 func expire_spell_cast(player_id: StringName, strokes: Array[PackedVector2Array], now_ms: int) -> CastResult:
-	if _pending_cast == null or _pending_cast.deadline_ms < 0 or now_ms < _pending_cast.deadline_ms:
+	var cast: PendingCast = _pending_casts.get(player_id)
+	if cast == null or cast.deadline_ms < 0 or now_ms < cast.deadline_ms:
 		return CastResult.NO_CAST
 	return submit_spell_cast(player_id, strokes, now_ms)
 
 
 func cancel_spell_cast(player_id: StringName) -> bool:
-	if _pending_cast == null or _pending_cast.player_id != player_id:
-		return false
-	_pending_cast = null
-	return true
+	return _pending_casts.erase(player_id)
 
 
 func _resolve_card(player: PlayerState, copy_id: int, target_id: StringName, power_percent := 100,
@@ -326,7 +338,7 @@ func _resolve_card(player: PlayerState, copy_id: int, target_id: StringName, pow
 
 
 func can_end_turn(player_id: StringName) -> bool:
-	return _pending_cast == null and _can_act(players.get(player_id))
+	return not _casting_blocks_actions(player_id) and _can_act(players.get(player_id))
 
 
 func end_turn(player_id: StringName) -> bool:
@@ -345,7 +357,7 @@ func end_turn(player_id: StringName) -> bool:
 
 func can_undo_ready(player_id: StringName) -> bool:
 	var player: PlayerState = players.get(player_id)
-	return (_pending_cast == null and phase == Phase.PLAYER and player != null and player.hp > 0 and player.ended_turn
+	return (not _casting_blocks_actions(player_id) and phase == Phase.PLAYER and player != null and player.hp > 0 and player.ended_turn
 		and _has_unready_living_players())
 
 
