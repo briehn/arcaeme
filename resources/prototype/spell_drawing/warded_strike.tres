@@ -1,0 +1,10 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/rune_template.gd" id="1_rune"]
+
+[resource]
+script = ExtResource("1_rune")
+display_name = "Crossing Ward"
+strokes = Array[PackedVector2Array]([PackedVector2Array(0.190, 0.280, 0.420, 0.280, 0.70, 0.610, 0.70, 0.770), PackedVector2Array(0.220, 0.770, 0.80, 0.250)])
+booster_stroke = PackedVector2Array(0.420, 0.280, 0.580, 0.160, 0.810, 0.160)
+cast_time_ms = 12000

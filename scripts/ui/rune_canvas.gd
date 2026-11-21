@@ -2,23 +2,31 @@ extends Control
 
 signal strokes_changed
 
-const GUIDE_COLOR := Color(0.54, 0.81, 0.9, 0.85)
+enum DrawingMode { HOLD, TOGGLE }
+
+const GUIDE_COLOR := Color("#b5a3db")
 const INK_COLOR := Color(1.0, 0.84, 0.54)
 const REFERENCE_SURFACE_SIDE := 348.0
-const BRUSH_OUTLINE := Color(0.86, 0.98, 1.0, 0.98)
-const BRUSH_EDGE := Color(0.06, 0.12, 0.18, 0.97)
-const BRUSH_FILL := Color(0.60, 0.89, 1.0, 0.20)
-const SURFACE_COLOR := Color(0.08, 0.11, 0.17)
-const FRAME_COLOR := Color(0.31, 0.42, 0.55)
+const BRUSH_OUTLINE := Color("#fff4dc")
+const BRUSH_EDGE := Color("#1d0c2b")
+const BRUSH_FILL := Color(1.0, 0.86, 0.63, 0.24)
+const SURFACE_COLOR := Color("#140e21")
+const GUIDE_HEIGHT_FRACTION := 0.76
+const GUIDE_WIDTH_FRACTION := 0.86
 const MIN_POINT_DISTANCE_SQUARED := 0.000004
 
 ## Ink diameter on the reference canvas (380 px square with 16 px padding).
-@export_range(1.0, 40.0, 0.5) var reference_ink_width := 9.0
+@export_range(1.0, 40.0, 0.5) var reference_ink_width := 11.0
+
+static var session_input_mode: DrawingMode = DrawingMode.HOLD
 
 var _guide: Array[PackedVector2Array] = []
+var _guide_fit := Transform2D.IDENTITY
 var _strokes: Array[PackedVector2Array] = []
 var _current := PackedVector2Array()
 var _drawing_enabled := false
+var _drawing_deadline_ms := 0
+var _input_mode: DrawingMode = DrawingMode.HOLD
 var _brush_overlay: Node2D
 
 
@@ -31,6 +39,7 @@ func _ready() -> void:
 
 func set_guide(guide: Array[PackedVector2Array]) -> void:
 	_guide = guide.duplicate()
+	_guide_fit = _fit_guide(guide)
 	clear_strokes()
 
 
@@ -44,9 +53,29 @@ func has_completed_strokes() -> bool:
 	return not _strokes.is_empty() and _current.is_empty()
 
 
-func set_drawing_enabled(enabled: bool) -> void:
+func set_drawing_enabled(enabled: bool, deadline_ms := 0) -> void:
 	_drawing_enabled = enabled
+	_drawing_deadline_ms = deadline_ms if enabled else 0
 	_update_brush(get_local_mouse_position())
+
+
+func set_input_mode(mode: DrawingMode) -> void:
+	if mode != _input_mode:
+		_finish_stroke()
+		_input_mode = mode
+
+
+func toggle_stroke() -> void:
+	if not _drawing_enabled or not is_visible_in_tree() or _input_mode != DrawingMode.TOGGLE:
+		return
+	var position_on_canvas := get_local_mouse_position()
+	if not _current.is_empty():
+		if _surface().has_point(position_on_canvas):
+			_append_point(position_on_canvas)
+		_finish_stroke()
+		return
+	if _surface().has_point(position_on_canvas):
+		_begin_stroke(position_on_canvas)
 
 
 func completed_strokes(include_in_progress := false) -> Array[PackedVector2Array]:
@@ -59,7 +88,17 @@ func completed_strokes(include_in_progress := false) -> Array[PackedVector2Array
 func _input(event: InputEvent) -> void:
 	# Observe pointer motion even when the GUI routes it to another control or a drag owns it.
 	if _drawing_enabled and is_visible_in_tree() and event is InputEventMouseMotion:
-		_update_brush(get_global_transform_with_canvas().affine_inverse() * event.position)
+		var position_on_canvas: Vector2 = get_global_transform_with_canvas().affine_inverse() * event.position
+		_update_brush(position_on_canvas)
+		if not _surface().has_point(position_on_canvas):
+			_finish_stroke()
+		elif (_input_mode == DrawingMode.TOGGLE and not _current.is_empty()
+				and (_drawing_deadline_ms == 0 or Time.get_ticks_msec() < _drawing_deadline_ms)):
+			# Unheld viewport motion may not reach GUI input in a SubViewport.
+			if event.button_mask == 0:
+				_append_point(position_on_canvas)
+			else:
+				_finish_stroke()
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -67,24 +106,25 @@ func _gui_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		_update_brush(event.position)
+	if _input_mode != DrawingMode.HOLD:
+		if event is InputEventMouseButton and event.pressed:
+			_finish_stroke()
+		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		accept_event()
 		if event.pressed:
 			if _surface().has_point(event.position):
-				_current = PackedVector2Array([_normalize(event.position)])
-				_strokes_changed()
+				_begin_stroke(event.position)
 		elif not _current.is_empty():
-			_append_point(event.position)
-			if _current.size() > 1:
-				_strokes.append(_current)
-			_current = PackedVector2Array()
-			_strokes_changed()
+			if _surface().has_point(event.position):
+				_append_point(event.position)
+			_finish_stroke()
 	elif event is InputEventMouseMotion and not _current.is_empty():
 		accept_event()
-		if event.button_mask & MOUSE_BUTTON_MASK_LEFT:
+		if _surface().has_point(event.position) and event.button_mask & MOUSE_BUTTON_MASK_LEFT:
 			_append_point(event.position)
 		else:
-			_discard_current()
+			_finish_stroke()
 
 
 func _notification(what: int) -> void:
@@ -94,10 +134,14 @@ func _notification(what: int) -> void:
 			_update_brush(get_local_mouse_position())
 	elif what == NOTIFICATION_MOUSE_ENTER:
 		_update_brush(get_local_mouse_position())
-	elif what == NOTIFICATION_MOUSE_EXIT or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+	elif what == NOTIFICATION_MOUSE_EXIT:
 		_hide_brush()
-		if what == NOTIFICATION_APPLICATION_FOCUS_OUT and not _current.is_empty():
-			_discard_current()
+		_finish_stroke()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_hide_brush()
+		if not _current.is_empty():
+			_current.clear()
+			_strokes_changed()
 
 
 func _update_brush(local_position: Vector2) -> void:
@@ -121,8 +165,17 @@ func _append_point(position_on_canvas: Vector2) -> void:
 		queue_redraw()
 
 
-func _discard_current() -> void:
-	_current.clear()
+func _begin_stroke(position_on_canvas: Vector2) -> void:
+	_current = PackedVector2Array([_normalize(position_on_canvas)])
+	_strokes_changed()
+
+
+func _finish_stroke() -> void:
+	if _current.is_empty():
+		return
+	if _current.size() > 1:
+		_strokes.append(_current)
+	_current = PackedVector2Array()
 	_strokes_changed()
 
 
@@ -132,7 +185,9 @@ func _strokes_changed() -> void:
 
 
 func _surface() -> Rect2:
-	return Rect2(Vector2.ZERO, size).grow(-16.0)
+	var side := maxf(0.0, minf(size.x, size.y) - 32.0)
+	var square := Vector2.ONE * side
+	return Rect2((size - square) * 0.5, square)
 
 
 func _ink_width() -> float:
@@ -145,7 +200,24 @@ func _normalize(position_on_canvas: Vector2) -> Vector2:
 	return ((position_on_canvas - surface.position) / surface.size).clamp(Vector2.ZERO, Vector2.ONE)
 
 
+func _fit_guide(guide: Array[PackedVector2Array]) -> Transform2D:
+	if guide.is_empty() or guide[0].is_empty():
+		return Transform2D.IDENTITY
+	var bounds := Rect2(guide[0][0], Vector2.ZERO)
+	for stroke in guide:
+		for point in stroke:
+			bounds = bounds.expand(point)
+	var zoom := minf(GUIDE_WIDTH_FRACTION / maxf(bounds.size.x, 0.001),
+		GUIDE_HEIGHT_FRACTION / maxf(bounds.size.y, 0.001))
+	return Transform2D(0.0, Vector2.ONE * zoom, 0.0, Vector2(0.5, 0.5) - bounds.get_center() * zoom)
+
+
 func _local_points(stroke: PackedVector2Array) -> PackedVector2Array:
+	return _ink_points(_guide_fit * stroke)
+
+
+func _ink_points(stroke: PackedVector2Array) -> PackedVector2Array:
+	# Captured points stay in the physical square's normalized space, including on resize.
 	var surface := _surface()
 	var points := PackedVector2Array()
 	for point in stroke:
@@ -155,11 +227,11 @@ func _local_points(stroke: PackedVector2Array) -> PackedVector2Array:
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), SURFACE_COLOR)
-	draw_rect(Rect2(Vector2.ONE, size - Vector2(2.0, 2.0)), FRAME_COLOR, false, 1.0)
+	var guide_width := clampf(_surface().size.x * 0.009, 3.0, 6.0)
 	for guide_stroke in _guide:
 		var stroke := _local_points(guide_stroke)
 		for point in range(1, stroke.size()):
-			draw_dashed_line(stroke[point - 1], stroke[point], GUIDE_COLOR, 3.0, 8.0, true, true)
+			draw_dashed_line(stroke[point - 1], stroke[point], GUIDE_COLOR, guide_width, guide_width * 2.6, true, true)
 	for stroke in _strokes:
 		_draw_ink(stroke)
 	_draw_ink(_current)
@@ -168,7 +240,7 @@ func _draw() -> void:
 func _draw_brush() -> void:
 	# The mouse-transparent child renders over both the guide and player ink.
 	var radius := _ink_width() * 0.5
-	var rim := minf(1.2, radius * 0.30)
+	var rim := radius * 0.26
 	_brush_overlay.draw_circle(Vector2.ZERO, radius, BRUSH_FILL, true, -1.0, true)
 	_brush_overlay.draw_arc(Vector2.ZERO, radius - rim, 0.0, TAU, 32, BRUSH_EDGE, rim * 2.0, true)
 	_brush_overlay.draw_arc(Vector2.ZERO, radius - rim * 1.5, 0.0, TAU, 32, BRUSH_OUTLINE, rim, true)
@@ -177,7 +249,7 @@ func _draw_brush() -> void:
 func _draw_ink(stroke: PackedVector2Array) -> void:
 	if stroke.is_empty():
 		return
-	var points := _local_points(stroke)
+	var points := _ink_points(stroke)
 	var width := _ink_width()
 	for index in range(1, points.size()):
 		draw_line(points[index - 1], points[index], INK_COLOR, width, true)

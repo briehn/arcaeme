@@ -1,0 +1,10 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/rune_template.gd" id="1_rune"]
+
+[resource]
+script = ExtResource("1_rune")
+display_name = "Open Folio"
+strokes = Array[PackedVector2Array]([PackedVector2Array(0.20, 0.270, 0.280, 0.680, 0.50, 0.570, 0.720, 0.680, 0.80, 0.270, 0.70, 0.190, 0.50, 0.30, 0.30, 0.190, 0.20, 0.270)])
+booster_stroke = PackedVector2Array(0.50, 0.30, 0.50, 0.720)
+cast_time_ms = 11500

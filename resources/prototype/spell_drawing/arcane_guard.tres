@@ -1,0 +1,10 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/rune_template.gd" id="1_rune"]
+
+[resource]
+script = ExtResource("1_rune")
+display_name = "Pageward"
+strokes = Array[PackedVector2Array]([PackedVector2Array(0.260, 0.230, 0.170, 0.330, 0.170, 0.650, 0.310, 0.770, 0.50, 0.730, 0.690, 0.770, 0.830, 0.650, 0.830, 0.330, 0.740, 0.230), PackedVector2Array(0.50, 0.730, 0.50, 0.350)])
+booster_stroke = PackedVector2Array(0.170, 0.520, 0.830, 0.520)
+cast_time_ms = 12000

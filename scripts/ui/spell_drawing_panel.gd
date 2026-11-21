@@ -1,6 +1,7 @@
 extends Control
 
 const RuneCanvas = preload("res://scripts/ui/rune_canvas.gd")
+const TOGGLE_STROKE_ACTION := &"toggle_rune_stroke"
 const NORMAL_TIME_COLOR := Color(0.98, 0.84, 0.56)
 const LOW_TIME_COLOR := Color(1.0, 0.59, 0.56)
 
@@ -11,7 +12,9 @@ signal cast_expired(strokes: Array[PackedVector2Array])
 
 @onready var _card_title: Label = %CardTitle
 @onready var _rune_name: Label = %RuneName
+@onready var _cast_context: Label = %CastContext
 @onready var _time_label: Label = %TimeLabel
+@onready var _instructions: Label = %Instructions
 @onready var _canvas: RuneCanvas = %RuneCanvas
 @onready var _clear_button: Button = %ClearButton
 @onready var _cancel_button: Button = %CancelButton
@@ -24,26 +27,36 @@ var _surface_ready := false
 
 func _ready() -> void:
 	set_process(false)
-	resized.connect(_fit_surface)
 	_cancel_button.pressed.connect(_cancel_cast)
 	_clear_button.pressed.connect(_canvas.clear_strokes)
 	_submit_button.pressed.connect(_submit_drawing)
 	_canvas.strokes_changed.connect(_refresh_buttons)
-	_fit_surface()
 
 
-func open_cast(card_name: String, rune_name: String, guide: Array[PackedVector2Array]) -> void:
+func open_cast(card_name: String, rune_name: String, guide: Array[PackedVector2Array], combat_context := "") -> void:
 	_cast_generation += 1
 	_reset_timer()
-	_card_title.text = "Cast %s" % card_name
+	set_input_mode(RuneCanvas.session_input_mode)
+	_card_title.text = card_name
 	_rune_name.text = rune_name
+	_cast_context.text = combat_context
+	_cast_context.visible = not combat_context.is_empty()
 	_time_label.text = "Get ready"
 	_time_label.add_theme_color_override(&"font_color", NORMAL_TIME_COLOR)
 	_canvas.set_guide(guide)
 	show()
-	_fit_surface()
 	_cancel_button.grab_focus()
 	_wait_for_surface(_cast_generation)
+
+
+func set_input_mode(mode: RuneCanvas.DrawingMode) -> void:
+	_canvas.set_input_mode(mode)
+	if mode == RuneCanvas.DrawingMode.TOGGLE:
+		var bindings := InputMap.action_get_events(TOGGLE_STROKE_ACTION)
+		var key := bindings[0].as_text() if not bindings.is_empty() else "the Toggle Drawing key"
+		_instructions.text = "Trace in any order or direction. Press %s to start or finish a stroke." % key
+	else:
+		_instructions.text = "Trace in any order or direction. Hold left click and release between strokes."
 
 
 func _wait_for_surface(generation: int) -> void:
@@ -62,7 +75,7 @@ func start_timer(deadline_ms: int) -> void:
 	if not _surface_ready or _deadline_ms != 0:
 		return
 	_deadline_ms = deadline_ms
-	_canvas.set_drawing_enabled(true)
+	_canvas.set_drawing_enabled(true, deadline_ms)
 	_refresh_buttons()
 	set_process(true)
 	_process(0.0)
@@ -90,12 +103,6 @@ func _process(_delta: float) -> void:
 	_time_label.text = "%0.1f s" % (ceilf(remaining_ms / 100.0) / 10.0)
 	_time_label.add_theme_color_override(&"font_color",
 		LOW_TIME_COLOR if remaining_ms < 1500 else NORMAL_TIME_COLOR)
-
-
-func _fit_surface() -> void:
-	# Leave room for the heading and actions at the smallest supported height.
-	var side := clampf(minf(size.x - 64.0, size.y - 205.0), 160.0, 380.0)
-	_canvas.custom_minimum_size = Vector2(side, side)
 
 
 func _refresh_buttons() -> void:
@@ -143,6 +150,12 @@ func _input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"ui_cancel"):
 		get_viewport().set_input_as_handled()
 		_cancel_cast()
+	elif _deadline_ms != 0 and event is InputEventKey and event.is_action_pressed(TOGGLE_STROKE_ACTION, false, true):
+		var focused := get_viewport().gui_get_focus_owner()
+		if focused is LineEdit or focused is TextEdit:
+			return
+		get_viewport().set_input_as_handled()
+		_canvas.toggle_stroke()
 
 
 func _unhandled_key_input(_event: InputEvent) -> void:

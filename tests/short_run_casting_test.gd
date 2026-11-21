@@ -19,7 +19,9 @@ const SETTINGS = preload("res://resources/prototype/spell_drawing_settings.tres"
 const ASTRA = preload("res://resources/prototype/cards/expansion/astral_salvo.tres")
 const BLOCK = preload("res://resources/prototype/cards/basic_block.tres")
 const BOOSTER = preload("res://resources/prototype/cards/spell_ink_booster.tres")
+const GUARD = preload("res://resources/prototype/cards/arcane_guard.tres")
 const STRIKE = preload("res://resources/prototype/cards/basic_strike.tres")
+const TWIN = preload("res://resources/prototype/cards/pool_expansion/twin_sigil.tres")
 const SOLO := RunState.PLAYER_ID
 const FIRST := &"Battle Mage 1"
 const SECOND := &"Battle Mage 2"
@@ -35,12 +37,14 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	await _test_main_launch()
+	await _test_standalone_catalogue_launch()
 	_test_seeded_draws()
 	_viewport = SubViewport.new()
 	_viewport.size = Vector2i(1280, 720)
 	root.add_child(_viewport)
 	await _test_solo_portal_run()
 	await _test_local_run()
+	await _test_local_victory()
 	await _test_abandoned_cast()
 	_viewport.queue_free()
 	await _settle()
@@ -96,6 +100,29 @@ func _test_main_launch() -> void:
 		await _settle()
 	_check(BOOSTER not in ROUTE.starting_deck and ROUTE.starting_deck.size() == 11,
 		"launching either pilot leaves the shared route resource untouched")
+
+
+func _test_standalone_catalogue_launch() -> void:
+	change_scene_to_packed(MAIN)
+	await scene_changed
+	var menu := current_scene
+	(menu.get_node("%SpellDrawing") as CheckBox).button_pressed = true
+	(menu.get_node("%CardExpansion") as CheckBox).button_pressed = true
+	(menu.get_node("%StartLocalCoopButton") as Button).pressed.emit()
+	await scene_changed
+	var view := current_scene as CombatView
+	var catalogue := BattleMagePool.catalogue()
+	_check(view != null and view.encounter.test_deck == catalogue + [BOOSTER],
+		"the standalone expansion option makes the entire catalogue available with drawing enabled")
+	for mage in [FIRST, SECOND]:
+		var player := view._state.players[mage]
+		for index in catalogue.size():
+			_check(view._state.requires_rune(player.first_copy_id + index),
+				"%s uses a rune in %s's standalone catalogue deck" % [catalogue[index].display_name, mage])
+		_check(not view._state.requires_rune(player.first_copy_id + catalogue.size()),
+			"the practice Booster remains instant for %s" % mage)
+	unload_current_scene()
+	await _settle()
 
 
 func _test_seeded_draws() -> void:
@@ -159,16 +186,24 @@ func _test_solo_portal_run() -> void:
 	_check(second.hp == 0 and first.hp == 1 and state.players[SOLO].mana == 2 and state.players[SOLO].burning == 3
 		and state.players[SOLO].arcana_used and state.action_history.back().spell_power_percent == 110,
 		"exact targeted casting combines with Tower, spends one Mana, and hits only the selected Slime")
+	var guard_copy := _copy(state, SOLO, GUARD)
+	await _press(_card_button(opening, GUARD))
+	_check(_panel(opening).visible and state.players[SOLO].mana == 2,
+		"the new hybrid rune holds Arcane Guard until drawing resolves")
+	await _submit_guide(opening)
+	_check(state.players[SOLO].block == 8 and state.players[SOLO].mana == 1
+		and state.players[SOLO].discard_pile.count(guard_copy) == 1 and state.players[SOLO].hand.size() == 4,
+		"Arcane Guard scales only Block and draws exactly one card in the solo run")
 	await _select_attack(opening, STRIKE, first.id)
 	await _submit_guide(opening)
-	_check(state.phase == CombatState.Phase.VICTORY and state.players[SOLO].mana == 1,
+	_check(state.phase == CombatState.Phase.VICTORY and state.players[SOLO].mana == 0,
 		"drawn attacks can win the opening combat")
 	await _press(opening.end_turn_button)
 	_check(run._run.stage == RunState.Stage.REWARD and run._combat_view == null,
 		"continue closes the old drawing view and enters the normal reward screen")
 	var opening_counts: Dictionary = run._casting_pacing.encounters[1]
-	_check(opening_counts.prompts == 4 and opening_counts.successful == 2 and opening_counts.excellent == 2
-		and opening_counts.canceled == 1 and opening_counts.drawing_ms >= 0 and opening_counts.casts_by_seat[1] == 2
+	_check(opening_counts.prompts == 5 and opening_counts.successful == 3 and opening_counts.excellent == 3
+		and opening_counts.canceled == 1 and opening_counts.drawing_ms >= 0 and opening_counts.casts_by_seat[1] == 3
 		and "Encounter 1" in run.heading.tooltip_text, "opening metrics count resolved, invalid and canceled prompts once")
 	_check(run._run.reward_options() == fixture.reward_offers(RunData.BATTLE_MAGE, 1, 0)
 		and state.submit_spell_cast(SOLO, STRIKE.rune_template.strokes, Time.get_ticks_msec()) == CombatState.CastResult.NO_CAST,
@@ -315,6 +350,40 @@ func _test_local_run() -> void:
 	await _settle()
 
 
+func _test_local_victory() -> void:
+	var fixture: RunData = ROUTE.duplicate()
+	fixture.starting_deck = [TWIN, STRIKE, GUARD, BLOCK, BOOSTER]
+	var run := await _open_run(fixture, true)
+	for encounter_id in range(1, fixture.encounter_count() + 1):
+		var view := run._combat_view
+		var state := view._state
+		var selector := view.get_node("%PlayerSelector")
+		for slot in state.enemies.size():
+			var seat := slot % 2
+			var mage := FIRST if seat == 0 else SECOND
+			var target := state.enemies[slot]
+			target.hp = 1
+			view._render()
+			await _press(selector.get_child(seat) as Button)
+			await _select_attack(view, TWIN, target.id)
+			await _submit_guide(view)
+			_check(target.hp == 0 and state.players[mage].mana == 2
+				and state.action_history.back().spell_power_percent == 110,
+				"the newly assigned multi-hit rune resolves for its own seat in fight %d" % encounter_id)
+		_check(state.phase == CombatState.Phase.VICTORY, "drawn attacks clear local fight %d" % encounter_id)
+		await _press(view.end_turn_button)
+		if encounter_id < fixture.encounter_count():
+			for mage in [FIRST, SECOND]:
+				await _press(_choice(run, "Show %s Reward" % mage))
+				await _press(_choice(run, "Skip Reward"))
+	_check(run._local_run.stage == CoopRunState.VICTORY and run.heading.text == "Run Victory"
+		and run._combat_view == null and run._casting_pacing.encounters.size() == 3
+		and run._casting_pacing.totals.casts_by_seat == {1: 3, 2: 2},
+		"both local seats cast through the full route and victory closes the drawing view")
+	run.queue_free()
+	await _settle()
+
+
 func _test_abandoned_cast() -> void:
 	var fixture := _fixture(false)
 	var salvo: CardData = ASTRA.duplicate()
@@ -353,7 +422,7 @@ func _fixture(portals: bool) -> RunData:
 	data.portal_enabled = portals
 	data.major_arcana_enabled = portals
 	# Small fixture deck makes a drawn rune available whenever an encounter starts.
-	data.starting_deck = [STRIKE, STRIKE, STRIKE, BLOCK, BOOSTER]
+	data.starting_deck = [STRIKE, STRIKE, GUARD, BLOCK, BOOSTER]
 	# Use deterministic seeds that actually offer Salvo to the first seat.
 	for seed in range(104775, 104875):
 		data.run_seed = seed

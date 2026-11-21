@@ -5,6 +5,7 @@ const EncounterData = preload("res://scripts/combat/encounter_data.gd")
 const RunData = preload("res://scripts/run/run_data.gd")
 const COMBAT_SCENE = preload("res://scenes/combat.tscn")
 const EnemyPlaytestSelector = preload("res://scripts/ui/enemy_playtest_selector.gd")
+const RuneCanvas = preload("res://scripts/ui/rune_canvas.gd")
 const CardExpansionPlaytest = preload("res://scripts/run/card_expansion_playtest.gd")
 const BattleMagePoolPlaytest = preload("res://scripts/run/battle_mage_pool_playtest.gd")
 const PrototypeRunView = preload("res://scripts/prototype_run.gd")
@@ -22,6 +23,7 @@ const SPELL_INK_BOOSTER = preload("res://resources/prototype/cards/spell_ink_boo
 @onready var battle_mage_pool: CheckBox = %BattleMagePool
 @onready var spell_drawing: CheckBox = %SpellDrawing
 @onready var spell_drawing_bypass: CheckBox = %SpellDrawingBypass
+@onready var drawing_input_mode: OptionButton = %DrawingInputMode
 
 var _enemy_local_coop_button: Button
 
@@ -37,6 +39,14 @@ func _ready() -> void:
 		toggle.add_theme_icon_override(&"unchecked", unchecked)
 		toggle.add_theme_icon_override(&"checked", checked)
 	spell_drawing.toggled.connect(_set_drawing_bypass_available)
+	drawing_input_mode.add_item("Hold Left Click", RuneCanvas.DrawingMode.HOLD)
+	drawing_input_mode.add_item("Toggle Drawing", RuneCanvas.DrawingMode.TOGGLE)
+	drawing_input_mode.select(drawing_input_mode.get_item_index(RuneCanvas.session_input_mode))
+	drawing_input_mode.item_selected.connect(_set_drawing_input_mode)
+
+
+func _set_drawing_input_mode(index: int) -> void:
+	RuneCanvas.session_input_mode = drawing_input_mode.get_item_id(index) as RuneCanvas.DrawingMode
 
 
 func _set_drawing_bypass_available(enabled: bool) -> void:
@@ -119,7 +129,7 @@ func _start_local_coop(encounter: EncounterData = null) -> void:
 		combat.encounter = encounter
 	if card_expansion.button_pressed:
 		combat.encounter = CardExpansionPlaytest.with_expansion_deck(combat.encounter)
-	_launch_combat(combat)
+	_launch_combat(combat, card_expansion.button_pressed)
 
 
 func _on_start_network_coop_pressed() -> void:
@@ -139,13 +149,17 @@ func _on_start_enemy_playtest_pressed() -> void:
 	combat.encounter = enemy_playtest.selected_encounter()
 	if card_expansion.button_pressed:
 		combat.encounter = CardExpansionPlaytest.with_expansion_deck(combat.encounter)
-	_launch_combat(combat)
+	_launch_combat(combat, card_expansion.button_pressed)
 
 
-func _launch_combat(combat: CombatView) -> void:
+func _launch_combat(combat: CombatView, expanded_deck := false) -> void:
 	if spell_drawing.button_pressed:
 		var fixture: EncounterData = combat.encounter.duplicate()
-		fixture.test_deck = SPELL_DRAWING.test_deck.duplicate()
+		if expanded_deck:
+			fixture.test_deck = BattleMagePoolPlaytest.catalogue()
+			fixture.test_deck.append(SPELL_INK_BOOSTER)
+		else:
+			fixture.test_deck = SPELL_DRAWING.test_deck.duplicate()
 		combat.encounter = fixture
 		combat.spell_drawing = SPELL_DRAWING
 		combat.bypass_drawing = spell_drawing_bypass.button_pressed

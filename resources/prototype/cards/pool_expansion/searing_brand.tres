@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="1_card"]
 [ext_resource type="Script" path="res://scripts/combat/card_effect.gd" id="2_effect"]
+[ext_resource type="Resource" path="res://resources/prototype/spell_drawing/searing_brand.tres" id="3_rune"]
 
 [sub_resource type="Resource" id="Effect_1"]
 script = ExtResource("2_effect")
@@ -15,6 +16,7 @@ amount = 4
 [resource]
 script = ExtResource("1_card")
 id = &"searing_brand"
+rune_template = ExtResource("3_rune")
 display_name = "Searing Brand"
 mana_cost = 2
 approval_status = "Provisional"

@@ -92,9 +92,13 @@ func _test_solo() -> void:
 		"target opens the rune overlay with timer, blank cast disabled, and End Turn locked")
 	_check("any order or direction" in (panel.find_child("Instructions", true, false) as Label).text,
 		"the guide describes free stroke order and direction")
+	var cast_context := panel.get_node("%CastContext") as Label
+	_check(_fully_visible(cast_context) and "3 Mana" in cast_context.text
+		and "Slime (2)" in cast_context.text and "22/22 HP" in cast_context.text,
+		"the casting header keeps the selected target and available Mana visible")
 	_check(player.mana == 3 and player.hand.size() == 5 and state.action_history.is_empty(),
 		"showing the target-specific cast spends no Mana and removes no card")
-	_check(_fully_visible(canvas) and absf(canvas.size.aspect() - 1.0) < 0.01
+	_check(_fully_visible(canvas) and absf(canvas._surface().size.aspect() - 1.0) < 0.01
 		and _fully_visible(panel.get_node("%TimeLabel")) and _fully_visible(cast_button),
 		"the square canvas, timer, and Cast control fit")
 	await _test_brush(canvas, panel, cast_button)
@@ -116,7 +120,7 @@ func _test_solo() -> void:
 	_draw_stroke(canvas, PackedVector2Array([
 		Vector2(0.15, 0.72), Vector2(0.83, 0.22), Vector2(0.24, 0.22),
 		Vector2(0.83, 0.82), Vector2(0.13, 0.40),
-	]))
+	]), true, false)
 	await _click(cast_button)
 	_check(not panel.visible and "unrecognized" in combat.spell_feedback.text.to_lower(),
 		"an unrelated mouse drawing reports failed recognition")
@@ -189,12 +193,14 @@ func _test_brush(canvas: RuneCanvas, panel: Control, cast_button: Button) -> voi
 	var cursor := canvas.mouse_default_cursor_shape
 	var start := surface.position + surface.size * 0.35
 	var tip := surface.position + surface.size * 0.65
-	var expected_width := 9.0 * surface.size.x / 348.0
-	_check(is_equal_approx(canvas.reference_ink_width, 9.0) and is_equal_approx(canvas._ink_width(), expected_width),
-		"visible ink scales from a 9 px reference diameter")
-	canvas.reference_ink_width = 12.0
-	_check(is_equal_approx(canvas._ink_width(), expected_width * 12.0 / 9.0), "brush diameter is configurable")
-	canvas.reference_ink_width = 9.0
+	var baseline_width := canvas.reference_ink_width
+	var expected_width := baseline_width * surface.size.x / 348.0
+	_check(baseline_width > 9.0 and is_equal_approx(canvas._ink_width(), expected_width),
+		"visible ink uses the larger reference diameter and scales with the surface")
+	canvas.reference_ink_width = baseline_width + 2.0
+	_check(is_equal_approx(canvas._ink_width(), expected_width * (baseline_width + 2.0) / baseline_width),
+		"brush diameter is configurable")
+	canvas.reference_ink_width = baseline_width
 	_mouse_motion(origin * start)
 	_check(overlay.is_visible_in_tree() and overlay.position.is_equal_approx(start)
 		and overlay.get_parent() == canvas and not overlay.show_behind_parent and canvas.mouse_default_cursor_shape == cursor,
@@ -306,8 +312,8 @@ func _connects_to_rune(guide: Array[PackedVector2Array]) -> bool:
 	return false
 
 
-func _draw_stroke(canvas: RuneCanvas, stroke: PackedVector2Array, release := true) -> void:
-	var points := canvas._local_points(stroke)
+func _draw_stroke(canvas: RuneCanvas, stroke: PackedVector2Array, release := true, template_space := true) -> void:
+	var points := canvas._local_points(stroke) if template_space else canvas._ink_points(stroke)
 	var transform := canvas.get_global_transform_with_canvas()
 	_mouse_button(transform * points[0], true)
 	for index in range(1, points.size()):

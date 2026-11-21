@@ -433,12 +433,25 @@ func _submit_card(copy_id: int, target: StringName) -> void:
 			_cast_opened_ms = Time.get_ticks_msec()
 			drawing_prompt_opened.emit()
 			var rune_name := String(cast.rune_name) + (" · extra stroke" if cast.boosted else "")
-			_spell_panel.open_cast(cast.card_name, rune_name, cast.guide)
+			_spell_panel.open_cast(cast.card_name, rune_name, cast.guide, _cast_context(target))
 		return
 	var played := _state.play_card(_selected_player_id, copy_id, target)
 	if played and spell_drawing != null:
 		_reset_spell_feedback()
 	_render()
+
+
+func _cast_context(target_id: StringName) -> String:
+	var caster := _state.players[_selected_player_id]
+	var context := "%d Mana · %d/%d HP" % [caster.mana, caster.hp, caster.max_hp]
+	if _state.players.size() > 1:
+		context = "%s · %s" % [caster.id, context]
+	var target := _state.enemy_state(target_id)
+	if target != null:
+		var button: Button = _enemy_buttons.get(target_id)
+		var name := button.text.get_slice("\n", 0) if button != null else target.display_name
+		context += "\n%s · %d/%d HP" % [name, target.hp, target.max_hp]
+	return context
 
 
 func _setup_spell_drawing() -> void:
@@ -461,7 +474,7 @@ func _reset_spell_feedback() -> void:
 	elif _state.players[_selected_player_id].spell_booster_primed:
 		spell_feedback.text = "Booster ready · Trace the connected extra stroke to use its bonus."
 	else:
-		spell_feedback.text = "Spell Drawing (Prototype) · Basic Strike, Basic Block, and Astral Salvo use runes. Other cards are instant for this test."
+		spell_feedback.text = "Spell Drawing (Prototype) · Battle Mage spells use runes. Boosters are instant."
 
 
 func _on_cast_surface_ready() -> void:

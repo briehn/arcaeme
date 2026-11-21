@@ -1,0 +1,10 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/rune_template.gd" id="1_rune"]
+
+[resource]
+script = ExtResource("1_rune")
+display_name = "Battle Standard"
+strokes = Array[PackedVector2Array]([PackedVector2Array(0.260, 0.80, 0.260, 0.210, 0.750, 0.210, 0.580, 0.380, 0.750, 0.550, 0.260, 0.550)])
+booster_stroke = PackedVector2Array(0.260, 0.630, 0.470, 0.850, 0.70, 0.670)
+cast_time_ms = 11000

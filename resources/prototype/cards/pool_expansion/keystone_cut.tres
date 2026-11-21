@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" path="res://scripts/combat/card_data.gd" id="1_card"]
 [ext_resource type="Script" path="res://scripts/combat/card_effect.gd" id="2_effect"]
+[ext_resource type="Resource" path="res://resources/prototype/spell_drawing/keystone_cut.tres" id="3_rune"]
 
 [sub_resource type="Resource" id="Effect_1"]
 script = ExtResource("2_effect")
@@ -15,6 +16,7 @@ amount = 3
 [resource]
 script = ExtResource("1_card")
 id = &"keystone_cut"
+rune_template = ExtResource("3_rune")
 display_name = "Keystone Cut"
 mana_cost = 1
 approval_status = "Provisional"

@@ -24,6 +24,13 @@ window/size/window_height_override=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
+[input]
+
+toggle_rune_stroke={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"keycode":88)]
+}
+
 [physics]
 
 3d/physics_engine="Jolt Physics"

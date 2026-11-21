@@ -1,0 +1,10 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/rune_template.gd" id="1_rune"]
+
+[resource]
+script = ExtResource("1_rune")
+display_name = "Keystone Edge"
+strokes = Array[PackedVector2Array]([PackedVector2Array(0.20, 0.710, 0.40, 0.290, 0.680, 0.290, 0.790, 0.510), PackedVector2Array(0.40, 0.290, 0.560, 0.580, 0.830, 0.680)])
+booster_stroke = PackedVector2Array(0.20, 0.710, 0.420, 0.770, 0.560, 0.580)
+cast_time_ms = 12000

@@ -1,0 +1,10 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/rune_template.gd" id="1_rune"]
+
+[resource]
+script = ExtResource("1_rune")
+display_name = "Sear Brand"
+strokes = Array[PackedVector2Array]([PackedVector2Array(0.260, 0.750, 0.610, 0.750, 0.750, 0.60, 0.610, 0.480, 0.720, 0.20), PackedVector2Array(0.350, 0.220, 0.340, 0.480, 0.50, 0.60)])
+booster_stroke = PackedVector2Array(0.340, 0.480, 0.610, 0.480)
+cast_time_ms = 14000

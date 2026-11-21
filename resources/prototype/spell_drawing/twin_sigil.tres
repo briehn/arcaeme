@@ -1,0 +1,10 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/rune_template.gd" id="1_rune"]
+
+[resource]
+script = ExtResource("1_rune")
+display_name = "Twin Teeth"
+strokes = Array[PackedVector2Array]([PackedVector2Array(0.190, 0.320, 0.340, 0.690, 0.50, 0.330, 0.660, 0.690, 0.810, 0.320)])
+booster_stroke = PackedVector2Array(0.340, 0.690, 0.50, 0.820, 0.660, 0.690)
+cast_time_ms = 11000

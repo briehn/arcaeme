@@ -3,21 +3,95 @@
 [ext_resource type="Script" path="res://scripts/ui/spell_drawing_panel.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/ui/rune_canvas.gd" id="2"]
 
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_spell_drawing"]
-content_margin_left = 20.0
-content_margin_top = 16.0
-content_margin_right = 20.0
-content_margin_bottom = 16.0
-bg_color = Color(0.115, 0.115, 0.18, 1)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.39, 0.41, 0.56, 1)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_right = 8
-corner_radius_bottom_left = 8
+[sub_resource type="StyleBoxFlat" id="ActionNormal"]
+content_margin_left = 12.0
+content_margin_right = 12.0
+bg_color = Color(0.16, 0.12, 0.23, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_left = 4
+corner_radius_bottom_right = 4
+
+[sub_resource type="StyleBoxFlat" id="ActionHover"]
+content_margin_left = 12.0
+content_margin_right = 12.0
+bg_color = Color(0.25, 0.18, 0.34, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_left = 4
+corner_radius_bottom_right = 4
+
+[sub_resource type="StyleBoxFlat" id="ActionPressed"]
+content_margin_left = 12.0
+content_margin_right = 12.0
+bg_color = Color(0.11, 0.08, 0.17, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_left = 4
+corner_radius_bottom_right = 4
+
+[sub_resource type="StyleBoxFlat" id="ActionDisabled"]
+content_margin_left = 12.0
+content_margin_right = 12.0
+bg_color = Color(0.12, 0.09, 0.16, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_left = 4
+corner_radius_bottom_right = 4
+
+[sub_resource type="StyleBoxFlat" id="ActionFocus"]
+content_margin_left = 12.0
+content_margin_right = 12.0
+bg_color = Color(0, 0, 0, 0)
+draw_center = false
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.89, 0.83, 0.99, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_left = 4
+corner_radius_bottom_right = 4
+
+[sub_resource type="StyleBoxFlat" id="CastNormal"]
+content_margin_left = 12.0
+content_margin_right = 12.0
+bg_color = Color(0.34, 0.24, 0.48, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_left = 4
+corner_radius_bottom_right = 4
+
+[sub_resource type="StyleBoxFlat" id="CastHover"]
+content_margin_left = 12.0
+content_margin_right = 12.0
+bg_color = Color(0.44, 0.32, 0.62, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_left = 4
+corner_radius_bottom_right = 4
+
+[sub_resource type="StyleBoxFlat" id="CastPressed"]
+content_margin_left = 12.0
+content_margin_right = 12.0
+bg_color = Color(0.24, 0.16, 0.35, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_left = 4
+corner_radius_bottom_right = 4
+
+[sub_resource type="Theme" id="CastingActions"]
+Button/colors/font_color = Color(0.94, 0.90, 0.99, 1)
+Button/colors/font_disabled_color = Color(0.59, 0.54, 0.66, 1)
+Button/colors/font_focus_color = Color(1, 0.97, 1, 1)
+Button/colors/font_hover_color = Color(1, 0.97, 1, 1)
+Button/colors/font_pressed_color = Color(1, 0.97, 1, 1)
+Button/styles/disabled = SubResource("ActionDisabled")
+Button/styles/focus = SubResource("ActionFocus")
+Button/styles/hover = SubResource("ActionHover")
+Button/styles/normal = SubResource("ActionNormal")
+Button/styles/pressed = SubResource("ActionPressed")
 
 [node name="SpellDrawingPanel" type="Control"]
 visible = false
@@ -38,76 +112,98 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0.02, 0.015, 0.04, 0.83)
+color = Color(0.052, 0.031, 0.083, 0.95)
 
-[node name="Margin" type="MarginContainer" parent="."]
+[node name="Workspace" type="VBoxContainer" parent="."]
 layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
+anchor_left = 0.115
+anchor_right = 0.885
 anchor_bottom = 1.0
+offset_top = 12.0
+offset_bottom = -12.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_constants/margin_left = 16
-theme_override_constants/margin_top = 16
-theme_override_constants/margin_right = 16
-theme_override_constants/margin_bottom = 16
-
-[node name="Panel" type="PanelContainer" parent="Margin"]
-custom_minimum_size = Vector2(440, 0)
-layout_mode = 2
-size_flags_horizontal = 4
-size_flags_vertical = 4
-theme_override_styles/panel = SubResource("StyleBoxFlat_spell_drawing")
-
-[node name="Content" type="VBoxContainer" parent="Margin/Panel"]
-layout_mode = 2
-mouse_filter = 2
 theme_override_constants/separation = 8
 
-[node name="Header" type="HBoxContainer" parent="Margin/Panel/Content"]
+[node name="Header" type="HBoxContainer" parent="Workspace"]
 layout_mode = 2
 mouse_filter = 2
+theme_override_constants/separation = 16
 
-[node name="CardTitle" type="Label" parent="Margin/Panel/Content/Header"]
+[node name="Spell" type="VBoxContainer" parent="Workspace/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="CardTitle" type="Label" parent="Workspace/Header/Spell"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.97, 0.93, 1, 1)
+theme_override_font_sizes/font_size = 24
+
+[node name="RuneName" type="Label" parent="Workspace/Header/Spell"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.77, 0.83, 0.99, 1)
+theme_override_font_sizes/font_size = 14
+
+[node name="CastContext" type="Label" parent="Workspace/Header"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.80, 0.75, 0.88, 1)
+theme_override_font_sizes/font_size = 14
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="TimeLabel" type="Label" parent="Workspace/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(112, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+horizontal_alignment = 2
+vertical_alignment = 1
+tooltip_text = "When time runs out, the game checks the strokes drawn so far."
+
+[node name="DrawingArea" type="AspectRatioContainer" parent="Workspace"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+stretch_mode = 2
+
+[node name="RuneCanvas" type="Control" parent="Workspace/DrawingArea"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(128, 128)
+layout_mode = 2
+script = ExtResource("2")
+
+[node name="Footer" type="HBoxContainer" parent="Workspace"]
+layout_mode = 2
+mouse_filter = 2
+theme = SubResource("CastingActions")
+theme_override_constants/separation = 20
+
+[node name="Instructions" type="Label" parent="Workspace/Footer"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 24
+theme_override_colors/font_color = Color(0.76, 0.71, 0.83, 1)
+theme_override_font_sizes/font_size = 15
+vertical_alignment = 1
+autowrap_mode = 3
+text = "Trace in any order or direction. Hold left click and release between strokes."
 
-[node name="TimeLabel" type="Label" parent="Margin/Panel/Content/Header"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(88, 0)
-layout_mode = 2
-theme_override_font_sizes/font_size = 24
-horizontal_alignment = 2
-tooltip_text = "When time runs out, the game checks the strokes drawn so far."
-
-[node name="RuneName" type="Label" parent="Margin/Panel/Content"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_colors/font_color = Color(0.73, 0.88, 0.98, 1)
-
-[node name="Instructions" type="Label" parent="Margin/Panel/Content"]
-layout_mode = 2
-text = "Trace each line in any order or direction. Lift between strokes."
-
-[node name="RuneCanvas" type="Control" parent="Margin/Panel/Content"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(300, 300)
-layout_mode = 2
-size_flags_horizontal = 4
-script = ExtResource("2")
-
-[node name="Actions" type="HBoxContainer" parent="Margin/Panel/Content"]
+[node name="Actions" type="HBoxContainer" parent="Workspace/Footer"]
 layout_mode = 2
 mouse_filter = 2
-alignment = 2
 theme_override_constants/separation = 8
 
-[node name="CancelButton" type="Button" parent="Margin/Panel/Content/Actions"]
+[node name="CancelButton" type="Button" parent="Workspace/Footer/Actions"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(76, 34)
+custom_minimum_size = Vector2(82, 44)
 layout_mode = 2
 focus_neighbor_left = NodePath("../ClearButton")
 focus_neighbor_top = NodePath(".")
@@ -117,9 +213,9 @@ focus_next = NodePath("../ClearButton")
 focus_previous = NodePath("../ClearButton")
 text = "Cancel"
 
-[node name="ClearButton" type="Button" parent="Margin/Panel/Content/Actions"]
+[node name="ClearButton" type="Button" parent="Workspace/Footer/Actions"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(68, 34)
+custom_minimum_size = Vector2(76, 44)
 layout_mode = 2
 focus_neighbor_left = NodePath("../CancelButton")
 focus_neighbor_top = NodePath(".")
@@ -129,10 +225,13 @@ focus_next = NodePath("../CancelButton")
 focus_previous = NodePath("../CancelButton")
 text = "Clear"
 
-[node name="SubmitButton" type="Button" parent="Margin/Panel/Content/Actions"]
+[node name="SubmitButton" type="Button" parent="Workspace/Footer/Actions"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(104, 34)
+custom_minimum_size = Vector2(110, 44)
 layout_mode = 2
+theme_override_styles/normal = SubResource("CastNormal")
+theme_override_styles/hover = SubResource("CastHover")
+theme_override_styles/pressed = SubResource("CastPressed")
 focus_neighbor_left = NodePath("../ClearButton")
 focus_neighbor_top = NodePath(".")
 focus_neighbor_right = NodePath("../CancelButton")

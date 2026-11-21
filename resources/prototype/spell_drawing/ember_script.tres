@@ -1,0 +1,10 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/rune_template.gd" id="1_rune"]
+
+[resource]
+script = ExtResource("1_rune")
+display_name = "Ember Quill"
+strokes = Array[PackedVector2Array]([PackedVector2Array(0.250, 0.750, 0.50, 0.780, 0.650, 0.610, 0.640, 0.430, 0.450, 0.530, 0.460, 0.30, 0.610, 0.180)])
+booster_stroke = PackedVector2Array(0.640, 0.430, 0.810, 0.40, 0.850, 0.30)
+cast_time_ms = 10500

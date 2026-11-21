@@ -1,0 +1,10 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/rune_template.gd" id="1_rune"]
+
+[resource]
+script = ExtResource("1_rune")
+display_name = "Survey Pin"
+strokes = Array[PackedVector2Array]([PackedVector2Array(0.170, 0.780, 0.490, 0.190, 0.830, 0.780), PackedVector2Array(0.230, 0.610, 0.720, 0.610), PackedVector2Array(0.510, 0.460, 0.50, 0.840)])
+booster_stroke = PackedVector2Array(0.490, 0.190, 0.650, 0.220, 0.750, 0.370)
+cast_time_ms = 14500

@@ -1,0 +1,10 @@
+[gd_resource type="Resource" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/rune_template.gd" id="1_rune"]
+
+[resource]
+script = ExtResource("1_rune")
+display_name = "Focus Flame"
+strokes = Array[PackedVector2Array]([PackedVector2Array(0.240, 0.620, 0.220, 0.420, 0.360, 0.220, 0.480, 0.370, 0.640, 0.170, 0.770, 0.430, 0.730, 0.610), PackedVector2Array(0.280, 0.650, 0.420, 0.770, 0.590, 0.770, 0.720, 0.660)])
+booster_stroke = PackedVector2Array(0.480, 0.370, 0.490, 0.580, 0.590, 0.770)
+cast_time_ms = 14000

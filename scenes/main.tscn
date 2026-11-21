@@ -236,6 +236,11 @@ layout_mode = 2
 tooltip_text = "Enable rune casting in standalone solo or local combat and Multi-Enemy Short Runs."
 text = "Spell Drawing (Prototype)"
 
+[node name="DrawingInputMode" type="OptionButton" parent="ContentPanel/MenuScroll/Pages/PrototypeNavigation"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Drawing input for this session. Toggle Drawing uses X by default."
+
 [node name="SpellDrawingBypass" type="CheckBox" parent="ContentPanel/MenuScroll/Pages/PrototypeNavigation"]
 unique_name_in_owner = true
 layout_mode = 2

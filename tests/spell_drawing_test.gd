@@ -230,9 +230,8 @@ func _test_booster_and_ordered_hits() -> void:
 		and actor.spell_booster_primed, "the Booster spends one Mana and resolves instantly")
 	_check(not combat.play_card(MAGE, _copy(combat, BOOSTER), &"") and actor.mana == 2,
 		"another Booster cannot stack or pay while primed")
-	_check(combat.play_card(MAGE, _copy(combat, PREP), &"") and actor.spell_booster_primed
-		and combat.end_turn(MAGE) and actor.spell_booster_primed,
-		"an unassigned card and round closure preserve the one pending booster")
+	_check(combat.end_turn(MAGE) and actor.spell_booster_primed,
+		"round closure preserves the one pending Booster")
 	var salvo := _copy(combat, SALVO)
 	var cast := _start(combat, salvo, SECOND)
 	if not _check(not cast.is_empty(), "ready Booster allows Salvo to start"):
